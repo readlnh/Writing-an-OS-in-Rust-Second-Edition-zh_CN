@@ -1,8 +1,8 @@
 # 一个独立的rust二进制程序
 
 > 原文 https://os.phil-opp.com/freestanding-rust-binary/
-原作者 phil-opp
-译者 readlnh
+> 原作者 phil-opp
+> 译者 readlnh
 
 创建一个不依赖于标准库的rust可执行文件是我们创建属于自己的操作系统内核的第一步。这将使得在不依赖于底层操作系统的情况下在裸机[bare metal](https://en.wikipedia.org/wiki/Bare_machine) 上运行一个rust程序成为可能。
 
@@ -212,7 +212,7 @@ pub extern "C" fn _start() -> ! {
 [name mangling]: https://en.wikipedia.org/wiki/Name_mangling
 [C calling convention(C调用约定)]: https://en.wikipedia.org/wiki/Calling_convention
 
-`!`返回类型表示这个函数是发散的，也就是说，它不允许返回。这是因为entry point不能被任何函数调用，而应该由操作系统或者bootloader直接调用。所以，entry point应该调用操作析用的 [`exit` system call]而不是程序返回。在我们的情况里，对于这样一个没有任何事可以做的freestanding二进制程序，关机或许是一个不错的选择。现在，我们可以添加一个无限循环来满足永不返回的条件。
+`!`返回类型表示这个函数是发散的，也就是说，它不允许返回。这是因为entry point不能被任何函数调用，而应该由操作系统或者bootloader直接调用。所以，entry point应该调用操作系统的 [`exit` system call]而不是程序返回。在我们的情况里，对于这样一个没有任何事可以做的freestanding二进制程序，关机或许是一个不错的选择。现在，我们可以添加一个无限循环来满足永不返回的条件。
 
 [`exit` system call]: https://en.wikipedia.org/wiki/Exit_(system_call)
 
