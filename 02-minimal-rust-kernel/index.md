@@ -1,18 +1,13 @@
-+++
-title = "A Minimal Rust Kernel"
-weight = 2
-path = "minimal-rust-kernel"
-date = 2018-02-10
+# 最小Rust内核
 
-+++
+在这篇文章里我们将在x86架构上创建一个最小的64位Rust内核。我们将在上一篇文章[一个独立的rust二进制程序]的基础上创建一个磁盘启动镜像，并将一些内容显示在屏幕上。
 
-In this post we create a minimal 64-bit Rust kernel for the x86 architecture. We build upon the [freestanding Rust binary] from the previous post to create a bootable disk image, that prints something to the screen.
-
-[freestanding Rust binary]: ./second-edition/posts/01-freestanding-rust-binary/index.md
+[一个独立的rust二进制程序]: ./second-edition/posts/01-freestanding-rust-binary/index.md
 
 <!-- more -->
 
-This blog is openly developed on [GitHub]. If you have any problems or questions, please open an issue there. You can also leave comments [at the bottom]. The complete source code for this post can be found [here][post branch].
+这个系列的blog在[GitHub]上开放开发，如果你有任何问题，请在这里开一个issuse来讨论。当然你也可以在底部留言。你可以在[这里][post branch]找到这篇文章的完整源码。
+
 
 [GitHub]: https://github.com/phil-opp/blog_os
 [at the bottom]: #comments
@@ -20,90 +15,99 @@ This blog is openly developed on [GitHub]. If you have any problems or questions
 
 <!-- toc -->
 
-## The Boot Process
-When you turn on a computer, it begins executing firmware code that is stored in motherboard [ROM]. This code performs a [power-on self-test], detects available RAM, and pre-initializes the CPU and hardware. Afterwards it looks for a bootable disk and starts booting the operating system kernel.
+## Boot进程
+
+当你打开计算机时，计算机会执行存储在主板[ROM]里的固件代码。这些代码扮演了一个[上电自检]的角色，它会检查可用的RAM，预初始化CPU和硬件。然后，它会查找可引导磁盘并开始引导操作系统内核。
 
 [ROM]: https://en.wikipedia.org/wiki/Read-only_memory
-[power-on self-test]: https://en.wikipedia.org/wiki/Power-on_self-test
+[上电自检]: https://en.wikipedia.org/wiki/Power-on_self-test
 
-On x86, there are two firmware standards: the “Basic Input/Output System“ (**[BIOS]**) and the newer “Unified Extensible Firmware Interface” (**[UEFI]**). The BIOS standard is old and outdated, but simple and well-supported on any x86 machine since the 1980s. UEFI, in contrast, is more modern and has much more features, but is more complex to set up (at least in my opinion).
+在x86上，有两种固件标准:"简单输入/输出系统" (**[BIOS]**)和"统一可扩展固件接口" (**[UEFI]**)。BIOS标准比较古老且已经过时了，但是它很简单并且自1980年代起就对x86机器有着良好的支持。相反，UEFI则更现代，拥有更多的功能，但是配置起来也更复杂(至少在我看来是这样)。
 
 [BIOS]: https://en.wikipedia.org/wiki/BIOS
 [UEFI]: https://en.wikipedia.org/wiki/Unified_Extensible_Firmware_Interface
 
-Currently, we only provide BIOS support, but support for UEFI is planned, too. If you'd like to help us with this, check out the [Github issue](https://github.com/phil-opp/blog_os/issues/349).
+目前，我们只提供BIOS支持，但是UEFI支持也在计划之中。如果你希望帮助我实现它，请确认这个 [Github issue](https://github.com/phil-opp/blog_os/issues/349).。
+
 
 ### BIOS Boot
-Almost all x86 systems have support for BIOS booting, including newer UEFI-based machines that use an emulated BIOS. This is great, because you can use the same boot logic across all machines from the last centuries. But this wide compatibility is at the same time the biggest disadvantage of BIOS booting, because it means that the CPU is put into a 16-bit compatibility mode called [real mode] before booting so that archaic bootloaders from the 1980s would still work.
+几乎所有的x86系统都支持BIOS启动，包括比较新的基于UEFI的机器也会通过模拟BIOS的方式来支持。这很棒，因为你可以和从上世纪出现的各种老机器保持一致的启动逻辑。然而这种广泛的兼容性也是BIOS启动最大的缺点，因为这意味着在启动前CPU会处于被称为[实模式]的16位兼容模式下，正因如此那些1980年代的古老的bootloader才仍然能够工作。
 
-But let's start from the beginning:
+不过，现在让我们从头开始吧:
 
-When you turn on a computer, it loads the BIOS from some special flash memory located on the motherboard. The BIOS runs self test and initialization routines of the hardware, then it looks for bootable disks. If it finds one, the control is transferred to its _bootloader_, which is a 512-byte portion of executable code stored at the disk's beginning. Most bootloaders are larger than 512 bytes, so bootloaders are commonly split into a small first stage, which fits into 512 bytes, and a second stage, which is subsequently loaded by the first stage.
+当你打开计算机时，它会从主板上某些特殊的flash(闪存)里加载BIOS。BIOS会运行硬件自检和初始化程序，然后，它会寻找可引导的磁盘。当它找到时，它会将控制权转交给*bootloader*--一段存储在磁盘开头的512字节的代码。大部分bootloader都比512字节要大，所以一般会把bootloader分为第一小段(为了适应512字节)和第二段（随后从第一级加载）。
 
-The bootloader has to determine the location of the kernel image on the disk and load it into memory. It also needs to switch the CPU from the 16-bit [real mode] first to the 32-bit [protected mode], and then to the 64-bit [long mode], where 64-bit registers and the complete main memory are available. Its third job is to query certain information (such as a memory map) from the BIOS and pass it to the OS kernel.
+bootloader必须确定内核映像在磁盘上的位置，并将其加载到内存中。它还需要先将CPU置为16位[实模式]，再将其切换到32位[保护模式]，最后切换到64位[长模式]，只有在64位模式下，64位寄存器和完整的内存才可以使用。它的第三个任务则是从BIOS查询一些信息(例如内存映射)并将其传递给操作系统内核。
 
-[real mode]: https://en.wikipedia.org/wiki/Real_mode
-[protected mode]: https://en.wikipedia.org/wiki/Protected_mode
-[long mode]: https://en.wikipedia.org/wiki/Long_mode
+[实模式]: https://en.wikipedia.org/wiki/Real_mode
+[保护模式]: https://en.wikipedia.org/wiki/Protected_mode
+[l长模式]: https://en.wikipedia.org/wiki/Long_mode
 [memory segmentation]: https://en.wikipedia.org/wiki/X86_memory_segmentation
 
-Writing a bootloader is a bit cumbersome as it requires assembly language and a lot of non insightful steps like “write this magic value to this processor register”. Therefore we don't cover bootloader creation in this post and instead provide a tool named [bootimage] that automatically prepends a bootloader to your kernel.
+实现一个bootloader有一点麻烦因为这会需要使用汇编语言以及很多没什么意义的工作例如"将一些魔数写到寄存器里"。因此，我们不会在本文中讲解如何实现一个bootloader，而是提供了一个叫做[bootimage]的工具，该工具可以把bootloader自动添加到内核里。
 
 [bootimage]: https://github.com/rust-osdev/bootimage
 
-If you are interested in building your own bootloader: Stay tuned, a set of posts on this topic is already planned! <!-- , check out our “_[Writing a Bootloader]_” posts, where we explain in detail how a bootloader is built. -->
+如果你对构建一个自己的bootloader感兴趣，请继续关注该教程，我已经计划了一系列关于此内容的文章！ <!-- , check out our “_[Writing a Bootloader]_” posts, where we explain in detail how a bootloader is built. -->
 
-#### The Multiboot Standard
-To avoid that every operating system implements its own bootloader, which is only compatible with a single OS, the [Free Software Foundation] created an open bootloader standard called [Multiboot] in 1995. The standard defines an interface between the bootloader and operating system, so that any Multiboot compliant bootloader can load any Multiboot compliant operating system. The reference implementation is [GNU GRUB], which is the most popular bootloader for Linux systems.
 
-[Free Software Foundation]: https://en.wikipedia.org/wiki/Free_Software_Foundation
+#### Multiboot 标准
+为了避免每个操作系统都实现一个自己的bootlaoder，每个bootloader都只兼容单个操作系统，[自由软件基金会]于1995年建立了一个叫[Multibooot]的开放bootloader标准。该标准定义了bootloader和操作系统之间的接口，所以任何Multiboot兼容的bootloader可以加载任何Multiboot兼容的操作系统。最典型的参考实现就是[GNU GRUB],它也是目前在Linux系统中最受欢迎的bootloader。
+
+
+[自由软件基金会]: https://en.wikipedia.org/wiki/Free_Software_Foundation
 [Multiboot]: https://wiki.osdev.org/Multiboot
 [GNU GRUB]: https://en.wikipedia.org/wiki/GNU_GRUB
 
-To make a kernel Multiboot compliant, one just needs to insert a so-called [Multiboot header] at the beginning of the kernel file. This makes it very easy to boot an OS in GRUB. However, GRUB and the Multiboot standard have some problems too:
+要使内核兼容Multiboot，只需要在内核文件的开头插入所谓的[Multiboot header] 。这样就可以非常简单的在GRUB里启动操作系统了。然而，GRUB和Multiboot规范也有一些问题:
 
 [Multiboot header]: https://www.gnu.org/software/grub/manual/multiboot/multiboot.html#OS-image-format
 
-- They support only the 32-bit protected mode. This means that you still have to do the CPU configuration to switch to the 64-bit long mode.
-- They are designed to make the bootloader simple instead of the kernel. For example, the kernel needs to be linked with an [adjusted default page size], because GRUB can't find the Multiboot header otherwise. Another example is that the [boot information], which is passed to the kernel, contains lots of architecture dependent structures instead of providing clean abstractions.
-- Both GRUB and the Multiboot standard are only sparsely documented.
-- GRUB needs to be installed on the host system to create a bootable disk image from the kernel file. This makes development on Windows or Mac more difficult.
+- 他们只支持32位保护模式。这意味着你仍然需要进行一些CPU配置来切换到64位长模式。
+- 他们是为了使bootloader更简单而不是为了使内核更简单而设计的。例如，内核需要以[调整后的默认页大小(adjusted default page size)]链接,否则GRUB找不到Multiboot头。另一个例子则是[boot information]，它包含大量与架构有关的数据，会被直接传递给内核而不是经过一层更清晰的抽象。
+- GRUB和Multiboot标准的文档说明都很少。
+- 只有在宿主机上安装了GRUB才能从内核文件里创建磁盘引导镜像。这就导致在Windows和Mac环境下的开发变得很困难。
 
-[adjusted default page size]: https://wiki.osdev.org/Multiboot#Multiboot_2
+[调整后的默认页大小(adjusted default page size)]: https://wiki.osdev.org/Multiboot#Multiboot_2
 [boot information]: https://www.gnu.org/software/grub/manual/multiboot/multiboot.html#Boot-information-format
 
-Because of these drawbacks we decided to not use GRUB or the Multiboot standard. However, we plan to add Multiboot support to our [bootimage] tool, so that it's possible to load your kernel on a GRUB system too. If you're interested in writing a Multiboot compliant kernel, check out the [first edition] of this blog series.
+由于这些缺点，我们决定不使用GRUB或是Multiboot规范。但是，我们计划在我们的[bootimage]工具里添加Multiboot支持，这样你就可以在一个GRUB系统里加载你的内核。如果你对实现一个Multiboot兼容的内核感兴趣，请查看这个博客系列文章的[first editon]。
 
 [first edition]: ./first-edition/_index.md
 
 ### UEFI
 
-(We don't provide UEFI support at the moment, but we would love to! If you'd like to help, please tell us in the [Github issue](https://github.com/phil-opp/blog_os/issues/349).)
+(目前我们不打算支持UEFI，但是我们还是很乐意支持UEFI的！如果你想要帮忙，请在[Github issue]里告诉我们。
 
-## A Minimal Kernel
-Now that we roughly know how a computer boots, it's time to create our own minimal kernel. Our goal is to create a disk image that prints a “Hello World!” to the screen when booted. For that we build upon the [freestanding Rust binary] from the previous post.
+## 最小内核
 
-As you may remember, we built the freestanding binary through `cargo`, but depending on the operating system we needed different entry point names and compile flags. That's because `cargo` builds for the _host system_ by default, i.e. the system you're running on. This isn't something we want for our kernel, because a kernel that runs on top of e.g. Windows does not make much sense. Instead, we want to compile for a clearly defined _target system_.
+现在我们已经大致了解了计算机的启动，是时候来创建我们自己的小内核了。我们的目标是创建一个在启动时会在屏幕上输出"Hello World"的磁盘镜像。我们在上一篇博客[一个独立的rust二进制程序]的基础上来继续。
 
-### Installing Rust Nightly
-Rust has three release channels: _stable_, _beta_, and _nightly_. The Rust Book explains the difference between these channels really well, so take a minute and [check it out](https://doc.rust-lang.org/book/appendix-07-nightly-rust.html#choo-choo-release-channels-and-riding-the-trains). For building an operating system we will need some experimental features that are only available on the nightly channel, so we need to install a nightly version of Rust.
+你也许还记得，我们是通过`cargo`来构建独立二进制程序的，然而这仍然依赖于操作系统:我们需要不同的入口点，不同的编译选项(flag)。这是因为*cargo*默认是以宿主系统，即你正在运行的那个操作系统为目标构建平台的。这不是我们想要的内核，因为内核如果要运行在例如Windows这样的操作系统上那就没有意义了。所以，我们需要明确的定义一个*目标编译系统(target system)*。
 
-To manage Rust installations I highly recommend [rustup]. It allows you to install nightly, beta, and stable compilers side-by-side and makes it easy to update them. With rustup you can use a nightly compiler for the current directory by running `rustup override add nightly`. Alternatively, you can add a file called `rust-toolchain` with the content `nightly` to the project's root directory. You can check that you have a nightly version installed by running `rustc --version`: The version number should contain `-nightly` at the end.
+
+
+### 安装Rust Nightly
+Rust有三个发行通道： *stable*, *beta*, 和 *nightly*。<<Rust编程语言>>一书对这些版本之间的区别有详细的解释，你可以花上一分钟来[查看一下](https://doc.rust-lang.org/book/appendix-07-nightly-rust.html#choo-choo-release-channels-and-riding-the-trains)。为了构建一个操作系统，我们需要一些只有nightly才会提供的实验性功能，所以我们需要安装nightly版的Rust。
+
+我强烈推荐用[rustup]来管理Rust安装。它允许你同时安装nightly, beta, 和stable版本并很方便的更新它们。通过rustup，你可以执行`rustup override add nightly`命令实现在当前目录下使用nightly 编译器。另外你可以将内容为`nightly`的名为`rust-toolchain`的文件添加到项目的根目录里。你还可以通过运行`rust --version`命令(版本号的最后应该要包含`-nightly`)来确认你安装的nightly版本。
 
 [rustup]: https://www.rustup.rs/
 
-The nightly compiler allows us to opt-in to various experimental features by using so-called _feature flags_ at the top of our file. For example, we could enable the experimental [`asm!` macro] for inline assembly by adding `#![feature(asm)]` to the top of our `main.rs`. Note that such experimental features are completely unstable, which means that future Rust versions might change or remove them without prior warning. For this reason we will only use them if absolutely necessary.
+nightly允许我们在文件的开头添加所谓的*feature flags*来选择使用某些实验性的功能。例如，我们可以通过在`main.rs`文件头部添加例如 `#![feature(asm)]` 来启用 实验性的内敛汇编[`asm!` macro(宏)]注意，像这样的实验性功能是完全不稳定的，这也以为着这些功能可能在没有提取说明的情况下就在某个版本里变动甚至被移除了。基于这个理由，我们只在必须的情况下才使用他们。
 
-[`asm!` macro]: https://doc.rust-lang.org/nightly/unstable-book/language-features/asm.html
+[`asm!` macro(宏)]: https://doc.rust-lang.org/nightly/unstable-book/language-features/asm.html
 
 ### Target Specification
-Cargo supports different target systems through the `--target` parameter. The target is described by a so-called _[target triple]_, which describes the CPU architecture, the vendor, the operating system, and the [ABI]. For example, the `x86_64-unknown-linux-gnu` target triple describes a system with a `x86_64` CPU, no clear vendor and a Linux operating system with the GNU ABI. Rust supports [many different target triples][platform-support], including `arm-linux-androideabi` for Android or [`wasm32-unknown-unknown` for WebAssembly](https://www.hellorust.com/setup/wasm-target/).
+cargo可以通过 `--target`参数来支持不同的目标系统。这个目标系统由所谓[目标三元组]来描述，它描述了CPU的架构，供应商，操作系统以及[ABI]。举个例子，`x86_64-unknown-linux-gnu`三元目标组描述了一个基于`x86_64` CPU，不明确的供应商，采用GNU ABI的Linux操作系统的结构。Rust支持[很多不同的目标三元组][平台支持]，包括安卓的 `arm-linux-androideabi`和[WebAssembly的`wasm32-unkonw`](https://www.hellorust.com/setup/wasm-target/)平台。
 
-[target triple]: https://clang.llvm.org/docs/CrossCompilation.html#target-triple
+
+
+[目标三元组]: https://clang.llvm.org/docs/CrossCompilation.html#target-triple
 [ABI]: https://stackoverflow.com/a/2456882
-[platform-support]: https://forge.rust-lang.org/platform-support.html
+[平台支持]: https://forge.rust-lang.org/platform-support.html
 
-For our target system, however, we require some special configuration parameters (e.g. no underlying OS), so none of the [existing target triples][platform-support] fits. Fortunately, Rust allows us to define our own target through a JSON file. For example, a JSON file that describes the `x86_64-unknown-linux-gnu` target looks like this:
+对于我们的目标系统，我们需要一些特殊的配置参数(例如，不依赖于底层操作系统)，所以现有的[目标三元组][平台支持]都不适用。幸运的是，Rust允许我们通过一个JOSN文件来定义我们自己的目标平台。例如，一个描述``x86_64-unknown-linux-gnu`目标平台的JSON文件如下:
 
 ```json
 {
@@ -121,12 +125,14 @@ For our target system, however, we require some special configuration parameters
 }
 ```
 
+大部分字段需要有LLVM来为该平台生成代码。例如， [`data-layout`]字段定义了各种整型，浮点型，指针类型的大小。还有一些用于Rust条件编译的字段，诸如 `target-pointer-width`。第三种类型的字段则定义了该如何构建一个crate。例如， `pre-link-args` 字段就指定了传递给[linker(链接器)]的参数。
+
 Most fields are required by LLVM to generate code for that platform. For example, the [`data-layout`] field defines the size of various integer, floating point, and pointer types. Then there are fields that Rust uses for conditional compilation, such as `target-pointer-width`. The third kind of fields define how the crate should be built. For example, the `pre-link-args` field specifies arguments passed to the [linker].
 
 [`data-layout`]: https://llvm.org/docs/LangRef.html#data-layout
-[linker]: https://en.wikipedia.org/wiki/Linker_(computing)
+[linker(链接器)]: https://en.wikipedia.org/wiki/Linker_(computing)
 
-We also target `x86_64` systems with our kernel, so our target specification will look very similar to the one above. Let's start by creating a `x86_64-blog_os.json` file (choose any name you like) with the common content:
+`x86_64`体系也是我们内核的目标平台之一，所以我们的target specfiation(目标配置)看起来和第一个非常相似。让我们从创建包含如下内容的 `x86_64-blog_os.json`(你可以任选一个你喜欢的名字)文件开始吧。 
 
 ```json
 {
