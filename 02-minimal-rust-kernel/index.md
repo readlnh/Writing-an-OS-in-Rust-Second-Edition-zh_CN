@@ -127,7 +127,6 @@ cargo可以通过 `--target`参数来支持不同的目标系统。这个目标�
 
 大部分字段需要有LLVM来为该平台生成代码。例如， [`data-layout`]字段定义了各种整型，浮点型，指针类型的大小。还有一些用于Rust条件编译的字段，诸如 `target-pointer-width`。第三种类型的字段则定义了该如何构建一个crate。例如， `pre-link-args` 字段就指定了传递给[linker(链接器)]的参数。
 
-Most fields are required by LLVM to generate code for that platform. For example, the [`data-layout`] field defines the size of various integer, floating point, and pointer types. Then there are fields that Rust uses for conditional compilation, such as `target-pointer-width`. The third kind of fields define how the crate should be built. For example, the `pre-link-args` field specifies arguments passed to the [linker].
 
 [`data-layout`]: https://llvm.org/docs/LangRef.html#data-layout
 [linker(链接器)]: https://en.wikipedia.org/wiki/Linker_(computing)
@@ -147,17 +146,16 @@ Most fields are required by LLVM to generate code for that platform. For example
 }
 ```
 
-Note that we changed the OS in the `llvm-target` and the `os` field to `none`, because we will run on bare metal.
+注意我们改变了`llvm-target`中的OS关键字，同时将`os`字段修改为`none`，因为在后面我们的操作系统是要跑在裸机上的。
 
-We add the following build-related entries:
-
+我们添加了以下与构建相关的条目:
 
 ```json
 "linker-flavor": "ld.lld",
 "linker": "rust-lld",
 ```
 
-Instead of using the platform's default linker (which might not support Linux targets), we use the cross platform [LLD] linker that is shipped with Rust for linking our kernel.
+这里我们使用Rust自带的跨平台[LLD] linker而不是平台默认的linker(平台自带的有可能不支持Linux目标平台)。
 
 [LLD]: https://lld.llvm.org/
 
@@ -165,34 +163,33 @@ Instead of using the platform's default linker (which might not support Linux ta
 "panic-strategy": "abort",
 ```
 
-This setting specifies that the target doesn't support [stack unwinding] on panic, so instead the program should abort directly. This has the same effect as the `panic = "abort"` option in our Cargo.toml, so we can remove it from there.
+该设置指定了目标平台不支持panic时的[栈展开(stack unwinding)],相应的，程序在panic时会直接终止。这个设置的效果和Cargo.toml里的`panic = "abort"`选项效果一样，所以我们可以从Cargo.toml里将其移除。
 
-[stack unwinding]: http://www.bogotobogo.com/cplusplus/stackunwinding.php
+[栈展开(stack unwinding)]: http://www.bogotobogo.com/cplusplus/stackunwinding.php
 
 ```json
 "disable-redzone": true,
 ```
 
-We're writing a kernel, so we'll need to handle interrupts at some point. To do that safely, we have to disable a certain stack pointer optimization called the _“red zone”_, because it would cause stack corruptions otherwise. For more information, see our separate post about [disabling the red zone].
+由于我们是在编写内核，所以我们在某些时候会需要处理中断。为了安全的执行该操作，我们必须禁用被称为*red zone*的堆栈指针优化，否则会导致堆栈损坏。想了解更多的信息，请阅读另一篇文章[禁用red zone]。
 
-[disabling the red zone]: ./second-edition/extra/disable-red-zone/index.md
+[禁用red zone]: ./second-edition/extra/disable-red-zone/index.md
 
 ```json
 "features": "-mmx,-sse,+soft-float",
 ```
+`feature`字段可以启用/禁用目标平台的功能。我们通过添加减号前缀来禁用`mmx`和`sse`功能，通过添加加号前缀来启用`soft-float`功能。
 
-The `features` field enables/disables target features. We disable the `mmx` and `sse` features by prefixing them with a minus and enable the `soft-float` feature by prefixing it with a plus.
+`mmx`和`sse`决定了是否支持[单指令多数据(SIMD)]，SIMD通常可以显著的提高程序运行的速度。然而，在操作系统内核里使用大型SIMD寄存器会导致性能问题。原因是系统在从中断程序返回前必须将所有的寄存器恢复原状。这也意味着，在每次系统调用和硬件中断发生时，内核都必须保存整个SIMD的状态。SIMD的状态非常大(一般在512-1600字节之间)而中断可能又会频繁发生，这些额外的保存/恢复操作会严重影响性能。为了避免这种情况，我们将为我们的内核(不是为上层应用)禁用SIMD。
 
-The `mmx` and `sse` features determine support for [Single Instruction Multiple Data (SIMD)] instructions, which can often speed up programs significantly. However, using the large SIMD registers in OS kernels leads to performance problems. The reason is that the kernel needs to restore all registers to their original state before continuing an interrupted program. This means that the kernel has to save the complete SIMD state to main memory on each system call or hardware interrupt. Since the SIMD state is very large (512–1600 bytes) and interrupts can occur very often, these additional save/restore operations considerably harm performance. To avoid this, we disable SIMD for our kernel (not for applications running on top!).
+[单指令多数据(SIMD)]: https://en.wikipedia.org/wiki/SIMD
 
-[Single Instruction Multiple Data (SIMD)]: https://en.wikipedia.org/wiki/SIMD
+禁用SIMD会导致的一个问题是在`X86_64`下浮点运算默认依赖于SIMD寄存器。为了解决这个问题，我们引入了`soft-float`功能。`soft-float`可以在通用整型数据的基础上通过软件模拟的方式来实现浮点运算。
 
-A problem with disabling SIMD is that floating point operations on `x86_64` require SIMD registers by default. To solve this problem, we add the `soft-float` feature, which emulates all floating point operations through software functions based on normal integers.
+想要了解更多信息，请阅读[禁用SIMD](./second-edition/extra/disable-simd/index.md)。
 
-For more information, see our post on [disabling SIMD](./second-edition/extra/disable-simd/index.md).
-
-#### Putting it Together
-Our target specification file now looks like this:
+#### 统合起来
+我们的target specification(目标平台配置)文件现在看起来应该如下:
 
 ```json
 {
@@ -212,10 +209,10 @@ Our target specification file now looks like this:
 }
 ```
 
-### Building our Kernel
-Compiling for our new target will use Linux conventions (I'm not quite sure why, I assume that it's just LLVM's default). This means that we need an entry point named `_start` as described in the [previous post]:
+### 构建我们的内核
+为了编译我们的系统，我们需要使用Linux的规范(我也不清楚为什，我猜可能是LLVM的默认设置？)。这也就意味着我们需要一个像[上一篇文章]里描述的名为`_start`的入口点。
 
-[previous post]: ./second-edition/posts/01-freestanding-rust-binary/index.md
+[上一篇文章]: ./second-edition/posts/01-freestanding-rust-binary/index.md
 
 ```rust
 // src/main.rs
@@ -239,9 +236,9 @@ pub extern "C" fn _start() -> ! {
 }
 ```
 
-Note that the entry point needs to be called `_start` regardless of your host OS. The Windows and macOS entry points from the previous post should be deleted.
+注意，不管你的宿主机是什么操作系统，你的入口点都必须叫`_start`。上一篇文章里提到的Windows和macOS的入口点都应该删掉。
 
-We can now build the kernel for our new target by passing the name of the JSON file as `--target`:
+我们现在可以通过把这个JSON文件名传入`--target`参数来编译我们的内核了:
 
 ```
 > cargo build --target x86_64-blog_os.json
@@ -250,15 +247,15 @@ error[E0463]: can't find crate for `core` OR
 error[E0463]: can't find crate for `compiler_builtins`
 ```
 
-It fails! The error tells us that the Rust compiler no longer finds the `core` or the `compiler_builtins` library. Both libraries are implicitly linked to all `no_std` crates. The [`core` library] contains basic Rust types such as `Result`, `Option`, and iterators, whereas the [`compiler_builtins` library] provides various lower level functions expected by LLVM, such as `memcpy`.
+编译失败！错误信息告诉我们Rust编译器没有找到`core`或是 `compiler_builtins`库。这两个库都会隐式的链接到所有的`no_std`包。[`core` library]包含了Rust的基础类型诸如`Result`,`Option`和迭代器，而 [`compiler_builtins` library]则提供了很多LLVM需要的底层函数，例如`memcpy`。
 
 [`core` library]: https://doc.rust-lang.org/nightly/core/index.html
 [`compiler_builtins` library]: https://github.com/rust-lang-nursery/compiler-builtins
 
-The problem is that the core library is distributed together with the Rust compiler as a _precompiled_ library. So it is only valid for supported host triples (e.g., `x86_64-unknown-linux-gnu`) but not for our custom target. If we want to compile code for other targets, we need to recompile `core` for these targets first.
+现在的问题是core library是作为*预编译库*和Rust编译器一起发布的。所以它只对它支持的目标三元组宿主(例如`x86_64-unknown-linux-gnu`)有效，而对我们自定义的平台无效。如果我们想要为我们自己的目标平台编译代码，我们需要先为目标平台重新编译`core`才行。
 
 #### Cargo xbuild
-That's where [`cargo xbuild`] comes in. It is a wrapper for `cargo build` that automatically cross-compiles `core` and other built-in libraries. We can install it by executing:
+这就是我们为什么需要引入 [`cargo xbuild`]的原因了。它是一个可以自动交叉编译`core`和其他内置库的`cargo build`的封装。我们可以通过执行如下命令来安装它:
 
 [`cargo xbuild`]: https://github.com/rust-osdev/cargo-xbuild
 
@@ -266,9 +263,9 @@ That's where [`cargo xbuild`] comes in. It is a wrapper for `cargo build` that a
 cargo install cargo-xbuild
 ```
 
-The command depends on the rust source code, which we can install with `rustup component add rust-src`.
+这个命令依赖于rust源码，我们可以通过`rustup component add rust-src`命令来安装rust源码。
 
-Now we can rerun the above command with `xbuild` instead of `build`:
+我们现在可以把上面的命令中的`build`替换成`xbuild`并重新运行:
 
 ```
 > cargo xbuild --target x86_64-blog_os.json
@@ -281,22 +278,22 @@ Now we can rerun the above command with `xbuild` instead of `build`:
     Finished dev [unoptimized + debuginfo] target(s) in 0.29 secs
 ```
 
-We see that `cargo xbuild` cross-compiles the `core`, `compiler_builtin`, and `alloc` libraries for our new custom target. Since these libraries use a lot of unstable features internally, this only works with a [nightly Rust compiler]. Afterwards, `cargo xbuild` successfully compiles our `blog_os` crate.
+我们看到`cargo xbuild`为我们自定义的目标平台交叉编译了 `core`, `compiler_builtin`, 和 `alloc` 库。由于这些库用了大量的unstable的功能，所以我们必须使用[nightly Rust compiler]。最后，我们终于成功编译了我们的`blog_os`crate。
 
 [nightly Rust compiler]: ./second-edition/posts/01-freestanding-rust-binary/index.md#installing-rust-nightly
 
-Now we are able to build our kernel for a bare metal target. However, our `_start` entry point, which will be called by the boot loader, is still empty. So let's output something to screen from it.
+我们现在终于可以为裸机构建我们的内核了。然而，我们提供给boot loader调用的`_start`入口点仍然是空的。所以，我们来让它向屏幕输出一些东西。
 
-### Printing to Screen
-The easiest way to print text to the screen at this stage is the [VGA text buffer]. It is a special memory area mapped to the VGA hardware that contains the contents displayed on screen. It normally consists of 25 lines that each contain 80 character cells. Each character cell displays an ASCII character with some foreground and background colors. The screen output looks like this:
+### 向屏幕打印
+现阶段像屏幕打印字符的最简单的方式就是通过[VGA text buffer]了。这是一块映射到VGA硬件的特殊的内存区域，它里面包含了要显示到屏幕上的内容。它通常由25行组成，每行包含80个字符单元。每个字符单元显示一个包含前景和背景色的ASCII字符。在屏幕上显示效果如下:
 
 [VGA text buffer]: https://en.wikipedia.org/wiki/VGA-compatible_text_mode
 
 ![screen output for common ASCII characters](https://upload.wikimedia.org/wikipedia/commons/6/6d/Codepage-737.png)
 
-We will discuss the exact layout of the VGA buffer in the next post, where we write a first small driver for it. For printing “Hello World!”, we just need to know that the buffer is located at address `0xb8000` and that each character cell consists of an ASCII byte and a color byte.
+我们会在下一章详细讨论VGA缓冲区的内存布局，届时我们将会为其写一个简单的驱动。现在，为了输出"Hello World!",我们只需要知道缓冲区的起始位置为`0xb8000`且每个字符单元包含一个ASCII字节和一个颜色字节。
 
-The implementation looks like this:
+代码实现如下:
 
 ```rust
 static HELLO: &[u8] = b"Hello World!";
@@ -316,28 +313,33 @@ pub extern "C" fn _start() -> ! {
 }
 ```
 
-First, we cast the integer `0xb8000` into a [raw pointer]. Then we [iterate] over the bytes of the [static] `HELLO` [byte string]. We use the [`enumerate`] method to additionally get a running variable `i`. In the body of the for loop, we use the [`offset`] method to write the string byte and the corresponding color byte (`0xb` is a light cyan).
+首先我们将整型数据`0xb8000`转成一个[裸指针]。然后，我们[迭代]遍历[静态(satic)][字节字符串]`HELLO`。我们使用 [`enumerate`]来获得另一个循环变量`i`。在for循环体中，我们用[`offset`]方法来将字符串字节和对应的颜色字节写入内存中(`0xb`代表浅青色)。
 
-[iterate]: https://doc.rust-lang.org/stable/book/ch13-02-iterators.html
-[static]: https://doc.rust-lang.org/book/ch10-03-lifetime-syntax.html#the-static-lifetime
+[迭代]: https://doc.rust-lang.org/stable/book/ch13-02-iterators.html
+[静态(static)]: https://doc.rust-lang.org/book/ch10-03-lifetime-syntax.html#the-static-lifetime
 [`enumerate`]: https://doc.rust-lang.org/core/iter/trait.Iterator.html#method.enumerate
-[byte string]: https://doc.rust-lang.org/reference/tokens.html#byte-string-literals
-[raw pointer]: https://doc.rust-lang.org/stable/book/ch19-01-unsafe-rust.html#dereferencing-a-raw-pointer
+[字节字符串]: https://doc.rust-lang.org/reference/tokens.html#byte-string-literals
+[裸指针]: https://doc.rust-lang.org/stable/book/ch19-01-unsafe-rust.html#dereferencing-a-raw-pointer
 [`offset`]: https://doc.rust-lang.org/std/primitive.pointer.html#method.offset
 
-Note that there's an [`unsafe`] block around all memory writes. The reason is that the Rust compiler can't prove that the raw pointers we create are valid. They could point anywhere and lead to data corruption. By putting them into an `unsafe` block we're basically telling the compiler that we are absolutely sure that the operations are valid. Note that an `unsafe` block does not turn off Rust's safety checks. It only allows you to do [four additional things].
+注意，在所有的写内存操作外都有一个[`unsafe`]区块包裹。原因是Rust编译器无法证明我们创建的裸指针是有效的。他们可能会指向任何地方并导致数据损坏。将代码放到`unsafe`块里基本上可以代表我们告诉编译器我们绝对确定自己做的操作都是合法的。注意`unsafe`块并没有关闭Rust的安全检查，它只是允许你做[四种例外事件]:
 
 [`unsafe`]: https://doc.rust-lang.org/stable/book/ch19-01-unsafe-rust.html
-[four additional things]: https://doc.rust-lang.org/stable/book/ch19-01-unsafe-rust.html#unsafe-superpowers
+[四种例外事件]: https://doc.rust-lang.org/stable/book/ch19-01-unsafe-rust.html#unsafe-superpowers
 
-I want to emphasize that **this is not the way we want to do things in Rust!** It's very easy to mess up when working with raw pointers inside unsafe blocks, for example, we could easily write behind the buffer's end if we're not careful.
+我要强调**随便使用unsafe并不是我们在Rust里的工作方式！**在unsafe块中使用裸指针很容易搞砸，举个例子，如果我们不小心的话我们会很容易往缓冲区外的内存写入数据。
 
-So we want to minimize the use of `unsafe` as much as possible. Rust gives us the ability to do this by creating safe abstractions. For example, we could create a VGA buffer type that encapsulates all unsafety and ensures that it is _impossible_ to do anything wrong from the outside. This way, we would only need minimal amounts of `unsafe` and can be sure that we don't violate [memory safety]. We will create such a safe VGA buffer abstraction in the next post.
+所以我们应该尽量最小化`unsafe`块。Rust给了我们创建安全抽象的能力来实现这个目标。举个例子，我们可以创建一个VGA缓冲区类型将所有的不安全的代码封装起来从而确保在外部操作时不会有任何不安全的错误发生。这样我们只需要最少的`unsafe`代码从而确保我们不会破坏[内存安全]。在下一篇文章里，我们将会创建这样的一个安全的VGA缓冲区抽象。
 
-[memory safety]: https://en.wikipedia.org/wiki/Memory_safety
+[内存安全]: https://en.wikipedia.org/wiki/Memory_safety
+
+## Running our Kernel
+
+Now that we have an executable that does something perceptible, it is time to run it. First, we need to turn our compiled kernel into a bootable disk image by linking it with a bootloader. Then we can run the disk image in the [QEMU] virtual machine or boot it on real hardware using an USB stick.
 
 ### Creating a Bootimage
-Now that we have an executable that does something perceptible, it is time to turn it into a bootable disk image. As we learned in the [section about booting], we need a bootloader for that, which initializes the CPU and loads our kernel.
+
+To turn our compiled kernel into a bootable disk image, we need to link it with a bootloader. As we learned in the [section about booting], the bootloader is responsible for initializing the CPU and loading our kernel.
 
 [section about booting]: #the-boot-process
 
@@ -349,30 +351,32 @@ Instead of writing our own bootloader, which is a project on its own, we use the
 # in Cargo.toml
 
 [dependencies]
-bootloader = "0.4.0"
+bootloader = "0.6.0"
 ```
 
-Adding the bootloader as dependency is not enough to actually create a bootable disk image. The problem is that we need to combine the bootloader with the kernel after it has been compiled, but cargo has no support for additional build steps after successful compilation (see [this issue][post-build script] for more information).
+Adding the bootloader as dependency is not enough to actually create a bootable disk image. The problem is that we need to link our kernel with the bootloader after compilation, but cargo has no support for [post-build scripts].
 
-[post-build script]: https://github.com/rust-lang/cargo/issues/545
+[post-build scripts]: https://github.com/rust-lang/cargo/issues/545
 
-To solve this problem, we created a tool named `bootimage` that first compiles the kernel and bootloader, and then combines them to create a bootable disk image. To install the tool, execute the following command in your terminal:
+To solve this problem, we created a tool named `bootimage` that first compiles the kernel and bootloader, and then links them together to create a bootable disk image. To install the tool, execute the following command in your terminal:
 
 ```
-cargo install bootimage --version "^0.5.0"
+cargo install bootimage --version "^0.7.3"
 ```
 
-The `^0.5.0` is a so-called [_caret requirement_], which means "version `0.5.0` or a later compatible version". So if we find a bug and publish version `0.5.1` or `0.5.2`, cargo would automatically use the latest version, as long as it is still a version `0.5.x`. However, it wouldn't choose version `0.6.0`, because it is not considered as compatible. Note that dependencies in your `Cargo.toml` are caret requirements by default, so the same rules are applied to our bootloader dependency.
+The `^0.7.3` is a so-called [_caret requirement_], which means "version `0.7.3` or a later compatible version". So if we find a bug and publish version `0.7.4` or `0.7.5`, cargo would automatically use the latest version, as long as it is still a version `0.7.x`. However, it wouldn't choose version `0.8.0`, because it is not considered as compatible. Note that dependencies in your `Cargo.toml` are caret requirements by default, so the same rules are applied to our bootloader dependency.
 
 [_caret requirement_]: https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html#caret-requirements
 
-After installing the `bootimage` tool, creating a bootable disk image is as easy as executing:
+For running `bootimage` and building the bootloader, you need to have the `llvm-tools-preview` rustup component installed. You can do so by executing `rustup component add llvm-tools-preview`.
+
+After installing `bootimage` and adding the `llvm-tools-preview` component, we can create a bootable disk image by executing:
 
 ```
-> bootimage build --target x86_64-blog_os.json
+> cargo bootimage
 ```
 
-You see that the tool recompiles your kernel using `cargo xbuild`, so it will automatically pick up any changes you make. Afterwards it compiles the bootloader, which might take a while. Like all crate dependencies it is only built once and then cached, so subsequent builds will be much faster. Finally, `bootimage` combines the bootloader and your kernel to a bootable disk image.
+We see that the tool recompiles our kernel using `cargo xbuild`, so it will automatically pick up any changes you make. Afterwards it compiles the bootloader, which might take a while. Like all crate dependencies it is only built once and then cached, so subsequent builds will be much faster. Finally, `bootimage` combines the bootloader and your kernel to a bootable disk image.
 
 After executing the command, you should see a bootable disk image named `bootimage-blog_os.bin` in your `target/x86_64-blog_os/debug` directory. You can boot it in a virtual machine or copy it to an USB drive to boot it on real hardware. (Note that this is not a CD image, which have a different format, so burning it to a CD doesn't work).
 
@@ -381,27 +385,16 @@ The `bootimage` tool performs the following steps behind the scenes:
 
 - It compiles our kernel to an [ELF] file.
 - It compiles the bootloader dependency as a standalone executable.
-- It appends the bytes of the kernel ELF file to the bootloader.
+- It links the bytes of the kernel ELF file to the bootloader.
 
 [ELF]: https://en.wikipedia.org/wiki/Executable_and_Linkable_Format
 [rust-osdev/bootloader]: https://github.com/rust-osdev/bootloader
 
 When booted, the bootloader reads and parses the appended ELF file. It then maps the program segments to virtual addresses in the page tables, zeroes the `.bss` section, and sets up a stack. Finally, it reads the entry point address (our `_start` function) and jumps to it.
 
-#### Bootimage Configuration
-The `bootimage` tool can be configured through a `[package.metadata.bootimage]` table in the `Cargo.toml` file. We can add a `default-target` option so that we no longer need to pass the `--target` argument:
+### 在QEMU里启动内核
 
-```toml
-# in Cargo.toml
-
-[package.metadata.bootimage]
-default-target = "x86_64-blog_os.json"
-```
-
-Now we can omit the `--target` argument and just run `bootimage build`.
-
-## Booting it!
-We can now boot the disk image in a virtual machine. To boot it in [QEMU], execute the following command:
+现在我们可以在虚拟机里启动这个磁盘镜像。可以通过执行以下命令来使其在[QEMU]中启动:
 
 [QEMU]: https://www.qemu.org/
 
@@ -410,26 +403,44 @@ We can now boot the disk image in a virtual machine. To boot it in [QEMU], execu
 warning: TCG doesn't support requested feature: CPUID.01H:ECX.vmx [bit 5]
 ```
 
+这会打开一个独立的窗口并显示如下画面:
+
 ![QEMU showing "Hello World!"](qemu.png)
 
-Alternatively, you can invoke the `run` subcommand of the `bootimage` tool:
+我们可以看到"Hello World!"已经显示在屏幕上了。
 
-```
-> bootimage run
-```
 
-By default it invokes the exact same QEMU command as above. Additional QEMU options can be passed after a `--`. For example, `bootimage run -- --help` will show the QEMU help. It's also possible to change the default command through an `run-command` key in the `package.metadata.bootimage` table in the `Cargo.toml`. For more information see the `--help` output or the [Readme file].
+### 物理机
+我们还可以将其写入到U盘中并在物理机上启动它:
 
-[Readme file]: https://github.com/rust-osdev/bootimage/blob/master/Readme.md
-
-### Real Machine
-It is also possible to write it to an USB stick and boot it on a real machine:
 
 ```
 > dd if=target/x86_64-blog_os/debug/bootimage-blog_os.bin of=/dev/sdX && sync
 ```
 
-Where `sdX` is the device name of your USB stick. **Be careful** to choose the correct device name, because everything on that device is overwritten.
+`sdx`是你的U盘设备名。**注意**选择正确的设备名，因为指定设备上的数据都将全部被擦除覆写。
 
-## What's next?
-In the next post, we will explore the VGA text buffer in more detail and write a safe interface for it. We will also add support for the `println` macro.
+在将镜像写入U盘后，你可以在任意机器上通过U盘来启动。为了从U盘启动系统你可能需要设置启动菜单或是在BIOS设置里修改启动顺序。注意，由于`bootloader`crate不支持UEFI，所以无法在UEFI的机器上启动。
+
+### Using `cargo run`
+
+To make it easier to run our kernel in QEMU, we can set the `runner` configuration key for cargo:
+
+```toml
+# in .cargo/config
+
+[target.'cfg(target_os = "none")']
+runner = "bootimage runner"
+```
+
+The `target.'cfg(target_os = "none")'` table applies to all targets that have set the `"os"` field of their target configuration file to `"none"`. This includes our `x86_64-blog_os.json` target. The `runner` key specifies the command that should be invoked for `cargo run`. The command is run after a successful build with the executable path passed as first argument. See the [cargo documentation][cargo configuration] for more details.
+
+The `bootimage runner` command is specifically designed to be usable as a `runner` executable. It links the given executable with the project's bootloader dependency and then launches QEMU. See the [Readme of `bootimage`] for more details and possible configuration options.
+
+[Readme of `bootimage`]: https://github.com/rust-osdev/bootimage
+
+Now we can use `cargo xrun` to compile our kernel and boot it in QEMU. Like `xbuild`, the `xrun` subcommand builds the sysroot crates before invoking the actual cargo command. The subcommand is also provided by `cargo-xbuild`, so you don't need to install an additional tool.
+
+
+## 下期预告
+在下一篇文章中，我们将探索VGA字符缓冲的更多细节并为它写一个安全的接口。我们将会为其添加一个`println`宏。
