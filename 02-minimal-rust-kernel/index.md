@@ -1,5 +1,10 @@
 # 最小Rust内核
 
+> 原文 https://os.phil-opp.com/freestanding-rust-binary/
+> 原作者 phil-opp
+> 译者 readlnh
+> 翻译项目地址 https://github.com/readlnh/Writing-an-OS-in-Rust-Second-Edition-zh_CN
+
 在这篇文章里我们将在x86架构上创建一个最小的64位Rust内核。我们将在上一篇文章[一个独立的rust二进制程序]的基础上创建一个磁盘启动镜像，并将一些内容显示在屏幕上。
 
 [一个独立的rust二进制程序]: ./second-edition/posts/01-freestanding-rust-binary/index.md
@@ -333,17 +338,15 @@ pub extern "C" fn _start() -> ! {
 
 [内存安全]: https://en.wikipedia.org/wiki/Memory_safety
 
-## Running our Kernel
+## 运行我们的内核
+现在既然我们已经有了一个可以打印字符的内核，那么是时候来运行它了。首先，我们需要通过链接到bootloader来把我们编译的内核制作成磁盘启动镜像。然后我们可以在qemu虚拟机里运行它或是通过一个U盘让它在物理机上启动。
 
-Now that we have an executable that does something perceptible, it is time to run it. First, we need to turn our compiled kernel into a bootable disk image by linking it with a bootloader. Then we can run the disk image in the [QEMU] virtual machine or boot it on real hardware using an USB stick.
+### 创建一个启动镜像
+为了将我们编译完的内核制作成磁盘启动镜像，我们需要将它和一个bootloader链接起来。就像我们在[启动相关的小结]了解到的那样，bootlaoder负责初始化CPU并加载我们的内核。
 
-### Creating a Bootimage
+[启动相关的小结]: #启动进程
 
-To turn our compiled kernel into a bootable disk image, we need to link it with a bootloader. As we learned in the [section about booting], the bootloader is responsible for initializing the CPU and loading our kernel.
-
-[section about booting]: #the-boot-process
-
-Instead of writing our own bootloader, which is a project on its own, we use the [`bootloader`] crate. This crate implements a basic BIOS bootloader without any C dependencies, just Rust and inline assembly. To use it for booting our kernel, we need to add a dependency on it:
+由于这个是我们自己的项目，我们使用[`bootloader`]crate而不是编写我们自己的bootloader。这个crate没有用任何c代码而是仅仅使用Rust和一些内联汇编实现了一个基本的BIOS bootloader。为了用它来启动我们的内核，我们在依赖里添加如下:
 
 [`bootloader`]: https://crates.io/crates/bootloader
 
@@ -354,43 +357,43 @@ Instead of writing our own bootloader, which is a project on its own, we use the
 bootloader = "0.6.0"
 ```
 
-Adding the bootloader as dependency is not enough to actually create a bootable disk image. The problem is that we need to link our kernel with the bootloader after compilation, but cargo has no support for [post-build scripts].
+仅仅将bootloader作为依赖添加到项目里不足以创建一个磁盘启动镜像。现在的问题是我们需要在内核编译完成之后将其链接到bootloader，但是cargo却不支持 [post-build scripts]。
 
 [post-build scripts]: https://github.com/rust-lang/cargo/issues/545
 
-To solve this problem, we created a tool named `bootimage` that first compiles the kernel and bootloader, and then links them together to create a bootable disk image. To install the tool, execute the following command in your terminal:
+为了解决这个问题，我们创建了一个名为`bootimage`的工具，它会先编译内核和bootloader，然后将他们链接在一起从而创建一个磁盘启动镜像。你可以通过在终端执行以下命令来安装这个工具:
 
 ```
 cargo install bootimage --version "^0.7.3"
 ```
 
-The `^0.7.3` is a so-called [_caret requirement_], which means "version `0.7.3` or a later compatible version". So if we find a bug and publish version `0.7.4` or `0.7.5`, cargo would automatically use the latest version, as long as it is still a version `0.7.x`. However, it wouldn't choose version `0.8.0`, because it is not considered as compatible. Note that dependencies in your `Cargo.toml` are caret requirements by default, so the same rules are applied to our bootloader dependency.
+ `^0.7.3` 被称为 [_caret requirement_]，它的意思是需要"`0.7.3`版本或是兼容其的更新的版本"。所以如果我们在已发布的版本如`0.7.4`或`0.7.5`上发现了bug，cargo会自动切换到最新的版本，前提是它仍然在`0.7.x`这个大版本里。相应的，cargo不会选择`0.8.0`版本，因为它被视为不兼容。注意，`Cargo.toml`里的依赖项默认都使用的`^`符号，所以bootloader依赖也不例外，他们应该使用相同的规则。
 
 [_caret requirement_]: https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html#caret-requirements
 
-For running `bootimage` and building the bootloader, you need to have the `llvm-tools-preview` rustup component installed. You can do so by executing `rustup component add llvm-tools-preview`.
+为了使用`bootimage`来构建bootloader，你需要先安装rustup组件`llvm-tools-preview` 。你可以通过执行`rustup component add llvm-tools-preview`命令添加它。
 
-After installing `bootimage` and adding the `llvm-tools-preview` component, we can create a bootable disk image by executing:
+在安装完`bootimage`并添加`llvm-tools-preview`组建后我们可以通过执行下面的命令来创建磁盘启动镜像:
 
 ```
 > cargo bootimage
 ```
 
-We see that the tool recompiles our kernel using `cargo xbuild`, so it will automatically pick up any changes you make. Afterwards it compiles the bootloader, which might take a while. Like all crate dependencies it is only built once and then cached, so subsequent builds will be much faster. Finally, `bootimage` combines the bootloader and your kernel to a bootable disk image.
+我们可以看到我们的工具使用`xcargo build`重新编译了我们的内核，也就是说它会自动把你做的修改添加进来。接着，它会编译bootloader，这需要一段时间。就像所有的crate依赖一样，它们只会编译一次，后续都会使用缓存中的内容，所以后续的编译速度将会更快。最后，`bootimage`会将bootloader和内核结合起来生成一个磁盘启动镜像。
 
-After executing the command, you should see a bootable disk image named `bootimage-blog_os.bin` in your `target/x86_64-blog_os/debug` directory. You can boot it in a virtual machine or copy it to an USB drive to boot it on real hardware. (Note that this is not a CD image, which have a different format, so burning it to a CD doesn't work).
+执行完这个命令之后，你可以在 `target/x86_64-blog_os/debug`目录下看到一个名为`bootimage-blog_os.bin`的文件。你可以在虚拟机里启动它或是将它通过一个USB设备拷贝到物理机上去。(注意，这不是一个CD镜像，他们有着不同的格式，所以将它烧录到CD上是无法使用的)。
 
-#### How does it work?
-The `bootimage` tool performs the following steps behind the scenes:
+#### `bootimage`做了什么呢?
+`bootimage`工具在底层实际做了这些工作：
 
-- It compiles our kernel to an [ELF] file.
-- It compiles the bootloader dependency as a standalone executable.
-- It links the bytes of the kernel ELF file to the bootloader.
+- 将内核编译成[ELF]文件
+- 将bootloader依赖编译成独立的可执行文件
+- 将内核ELF文件按字节和bootloader拼接起来
 
 [ELF]: https://en.wikipedia.org/wiki/Executable_and_Linkable_Format
 [rust-osdev/bootloader]: https://github.com/rust-osdev/bootloader
 
-When booted, the bootloader reads and parses the appended ELF file. It then maps the program segments to virtual addresses in the page tables, zeroes the `.bss` section, and sets up a stack. Finally, it reads the entry point address (our `_start` function) and jumps to it.
+在启动的时候，bootloader会读取并解析附加的ELF文件。然后它会将代码段映射到页表的虚拟地址里，将`.bss`小节设置0，并设置堆栈。最后，它会读取入口点的地址(在我们的内核里是`_start`函数)，并跳转到相应位置。
 
 ### 在QEMU里启动内核
 
@@ -422,9 +425,9 @@ warning: TCG doesn't support requested feature: CPUID.01H:ECX.vmx [bit 5]
 
 在将镜像写入U盘后，你可以在任意机器上通过U盘来启动。为了从U盘启动系统你可能需要设置启动菜单或是在BIOS设置里修改启动顺序。注意，由于`bootloader`crate不支持UEFI，所以无法在UEFI的机器上启动。
 
-### Using `cargo run`
+### 使用`cargo run`
 
-To make it easier to run our kernel in QEMU, we can set the `runner` configuration key for cargo:
+为了是在QEMU里运行我们的内核变得更简单方便，我们为crago配置`runner`关键字:
 
 ```toml
 # in .cargo/config
@@ -433,14 +436,14 @@ To make it easier to run our kernel in QEMU, we can set the `runner` configurati
 runner = "bootimage runner"
 ```
 
-The `target.'cfg(target_os = "none")'` table applies to all targets that have set the `"os"` field of their target configuration file to `"none"`. This includes our `x86_64-blog_os.json` target. The `runner` key specifies the command that should be invoked for `cargo run`. The command is run after a successful build with the executable path passed as first argument. See the [cargo documentation][cargo configuration] for more details.
+ `target.'cfg(target_os = "none")'`代表所有的目标平台的 `"os"` 字段的配置文件都被设置为 `"none"`。这其中也包括我们的`x86_64-blog_os.json`目标平台。`runner`关键字指定了由`cargo run`调用的命令。指定的命令将在成功构建后作为执行路径的第一个参数被传递并运行。具体细节请查看[cargo documentation][cargo configuration] 。
 
-The `bootimage runner` command is specifically designed to be usable as a `runner` executable. It links the given executable with the project's bootloader dependency and then launches QEMU. See the [Readme of `bootimage`] for more details and possible configuration options.
+`bootimage runner`命令是被专门设计为一个可执行的`runner`的。它会将给定的可执行文件和项目的bootloader依赖相关联，然后启动QEMU。更多的细节和配置选项请查看[Readme of `bootimage`]。
+
 
 [Readme of `bootimage`]: https://github.com/rust-osdev/bootimage
 
-Now we can use `cargo xrun` to compile our kernel and boot it in QEMU. Like `xbuild`, the `xrun` subcommand builds the sysroot crates before invoking the actual cargo command. The subcommand is also provided by `cargo-xbuild`, so you don't need to install an additional tool.
-
+现在我们可以使用`cargo xrun` 来编译我们的内核并在QEMU里启动啦。与`xbuild`一样，`xrun`字命令会在实际调用cargo命令前构建sysroot crates。子命令同样由`cargo-xbuild`提供，所以你无需安装其他的附加工具。
 
 ## 下期预告
 在下一篇文章中，我们将探索VGA字符缓冲的更多细节并为它写一个安全的接口。我们将会为其添加一个`println`宏。

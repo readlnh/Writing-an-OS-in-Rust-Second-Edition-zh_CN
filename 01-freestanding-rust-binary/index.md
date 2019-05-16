@@ -3,6 +3,7 @@
 > 原文 https://os.phil-opp.com/freestanding-rust-binary/
 > 原作者 phil-opp
 > 译者 readlnh
+> 翻译项目地址 https://github.com/readlnh/Writing-an-OS-in-Rust-Second-Edition-zh_CN
 
 创建一个不依赖于标准库的rust可执行文件是我们创建属于自己的操作系统内核的第一步。这将使得在不依赖于底层操作系统的情况下在裸机[bare metal](https://en.wikipedia.org/wiki/Bare_machine) 上运行一个rust程序成为可能。
 
