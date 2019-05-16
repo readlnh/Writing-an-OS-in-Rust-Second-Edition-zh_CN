@@ -1,6 +1,6 @@
 # 最小Rust内核
 
-> 原文 https://os.phil-opp.com/freestanding-rust-binary/
+> 原文 https://os.phil-opp.com/minimal-rust-kernel/
 > 原作者 phil-opp
 > 译者 readlnh
 > 翻译项目地址 https://github.com/readlnh/Writing-an-OS-in-Rust-Second-Edition-zh_CN
@@ -288,6 +288,20 @@ cargo install cargo-xbuild
 [nightly Rust compiler]: ./second-edition/posts/01-freestanding-rust-binary/index.md#installing-rust-nightly
 
 我们现在终于可以为裸机构建我们的内核了。然而，我们提供给boot loader调用的`_start`入口点仍然是空的。所以，我们来让它向屏幕输出一些东西。
+
+### 设置一个默认的Target
+
+为了避免每次调用`cargo-xbuild`都得向`--target`传递参数，我们必须指定一个默认的target。为了达成这个目标，我们在 `.cargo/config`目录下创建了一个包含如下内容的 [cargo configuration] 文件:
+
+[cargo configuration]: https://doc.rust-lang.org/cargo/reference/config.html
+
+```toml
+# in .cargo/config
+
+[build]
+target = "x86_64-blog_os.json"
+```
+这个配置告诉`cargo`，当没有明确的参数传递给 `--target` 时，默认使用我们自己的 `x86_64-blog_os.json` target。这也意味着我们现在可以使用简单的`cargo xbuild`来构建我们的内核了。想要了解更多关于cargo配置的可选项等信息，请阅读 [official documentation][cargo configuration]。
 
 ### 向屏幕打印
 现阶段像屏幕打印字符的最简单的方式就是通过[VGA text buffer]了。这是一块映射到VGA硬件的特殊的内存区域，它里面包含了要显示到屏幕上的内容。它通常由25行组成，每行包含80个字符单元。每个字符单元显示一个包含前景和背景色的ASCII字符。在屏幕上显示效果如下:
