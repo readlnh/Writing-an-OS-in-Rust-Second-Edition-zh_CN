@@ -322,8 +322,6 @@ struct Buffer {
 ```
 我们现在使用 `Volatile<ScreenChar>`来代替`ScreenChar`。(`Volatile`类型是一个[泛型]，因此它可以包装(几乎)任何类型)。这也保证了我们不会通过"普通"的写入操作意外向其写入数据。现在我们转而使用(Volatile)提供`write`方法。
 
-Instead of a `ScreenChar`, we're now using a `Volatile<ScreenChar>`. (The `Volatile` type is [generic] and can wrap (almost) any type). This ensures that we can't accidentally write to it through a “normal” write. Instead, we have to use the `write` method now.
-
 [泛型]: https://doc.rust-lang.org/book/ch10-01-syntax.html
 
 这也意味着我们需要修改我们的 `Writer::write_byte`方法:
@@ -436,7 +434,8 @@ impl Writer {
     }
 }
 ```
-This method clears a row by overwriting all of its characters with a space character.
+
+这个方法通过将整行所有的字符替换为空格字符来清空一行。
 
 ## 全局接口
 为了提供一个可供任意模块作为接口使用的不包含`Writer`实例的全局writer，我们试着创建了一个静态的`WRITER`:
