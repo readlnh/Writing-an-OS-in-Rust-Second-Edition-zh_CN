@@ -520,7 +520,7 @@ lazy_static! {
 }
 ```
 
-然而，由于这个`WRITER`是不可变的所以它可能并没有什么用。这也就意味这我们没法向其中写入任何东西(因为所有的write方法都采用的`&mut self`)。一个可能的解决方法是使用 [mutable static(可变静态变量)]。但是这样一来，它的所有读写操作都会变成不安全的，因为这样会很容易引起数据竞争以及其他的各种问题。使用`static mut`是极度不推荐的。甚至还有人提议将其[移除][remove static mut]。那么有什么作为替代呢？我们可以试着用不可变静态变量的cell类型比如[RefCell]抑或是提供[内部可变性]的[UnsafeCell]。但是这些类型都不是[Sync]的(这有充分的理由)，所以我们无法在静态变量中使用它们。
+然而，由于这个`WRITER`是不可变的所以它可能并没有什么用。这也就意味这我们没法向其中写入任何东西(因为所有的write方法都采用的`&mut self`)。一个可能的解决方法是使用 [mutable static(可变静态变量)]。但是这样一来，它的所有读写操作都会变成不安全的，因为这样会很容易引起数据竞争以及其他的各种问题。使用`static mut`是极度不推荐的。甚至还有人提议将其[移除][remove static mut]。那么有什么作为替代呢？我们可以试着用不可变静态变量的cell类型比如[RefCell]抑或是提供[interior mutability(内部可变性)]的[UnsafeCell]。但是这些类型都不是[Sync]的(这有充分的理由)，所以我们无法在静态变量中使用它们。
 
 [mutable static(可变静态变量)]: https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html#accessing-or-modifying-a-mutable-static-variable
 [remove static mut]: https://internals.rust-lang.org/t/pre-rfc-remove-static-mut/1437
