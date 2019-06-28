@@ -480,7 +480,7 @@ error[E0017]: references in statics may only refer to immutable values
 
 为了搞清楚这里到底发生了什么，我们需要清楚一件事：普通变量在运行时初始化而静态变量在编译时初始化。Rust编译器中用来处理这些初始化表达式的组件称为 “[const evaluator(常量求值器)]”。目前它的功能还很有限，但是对它的扩展工作正在进行中，例如，"[允许在常量中panic]”这个RFC文档的中的工作。
 
-[const evaluatorr(常量求值器)]: https://rust-lang.github.io/rustc-guide/const-eval.html
+[const evaluator(常量求值器)]: https://rust-lang.github.io/rustc-guide/const-eval.html
 [允许在常量中panic]: https://github.com/rust-lang/rfcs/pull/2345
 
 这个关于 `ColorCode::new`的问题可以通过使用 [`const` functions(常函数)]来解决，但是这里最根本的问题是Rust无法在编译时将裸指针转换为引用。或许将来某一天这个功能会实现，但是现在，我们需要寻找另一种解决方法。
