@@ -23,7 +23,7 @@
 
 ## Rust中的测试
 
-Rust有一个[内置的测试框架(built-in test framework)]无需任何设置就可以进行单元测试，只需要创建一个通过assert来了检查结果的函数并在函数的头部加上`#[test]`属性即可。然后`cargo test`会自动找到并执行你的crate中的所有测试函数。
+Rust有一个[内置的测试框架(built-in test framework)]无需任何设置就可以进行单元测试，只需要创建一个通过assert来检查结果的函数并在函数的头部加上`#[test]`属性即可。然后`cargo test`会自动找到并执行你的crate中的所有测试函数。
 
 [内置的测试框架(built-in test framework)]: https://doc.rust-lang.org/book/second-edition/ch11-00-testing.html
 
@@ -39,7 +39,7 @@ Rust有一个[内置的测试框架(built-in test framework)]无需任何设置�
 error[E0463]: can't find crate for `test`
 ```
 
-由于`test`crate依赖于标准库，所以它在我们的裸机目标上并不可用，虽然将`test`crate一直到一个 `#[no_std]` 上下文环境中是[可能的][utest]，但是这样做是高度不稳定的并且还会需要一些特殊的hacks，例如重定义 `panic` 宏。 
+由于`test`crate依赖于标准库，所以它在我们的裸机目标上并不可用，虽然将`test`crate移植到一个 `#[no_std]` 上下文环境中是[可能的][utest]，但是这样做是高度不稳定的并且还会需要一些特殊的hacks，例如重定义 `panic` 宏。 
 
 [utest]: https://github.com/japaric/utest
 
@@ -387,9 +387,9 @@ trivial assertion... [ok]
 
 ### 在panic时打印一个错误信息
 
-To exit QEMU with an error message on a panic, we can use [conditional compilation] to use a different panic handler in testing mode:
+为了在panic时使用错误信息来退出QEMU，我们可以使用[条件编译(conditional compilation)]在测试模式下使用(与非测试模式下)不同的panic处理方式:
 
-[conditional compilation]: https://doc.rust-lang.org/1.30.0/book/first-edition/conditional-compilation.html
+[条件编译(conditional compilation)]: https://doc.rust-lang.org/1.30.0/book/first-edition/conditional-compilation.html
 
 ```rust
 // our existing panic handler
@@ -411,9 +411,9 @@ fn panic(info: &PanicInfo) -> ! {
 }
 ```
 
-For our test panic handler, we use `serial_println` instead of `println` and then exit QEMU with a failure exit code. Note that we still need an endless `loop` after the `exit_qemu` call because the compiler does not know that the `isa-debug-exit` device causes a program exit.
+在我们的测试panic处理中，我们用 `serial_println`来代替`println` 并使用失败代码来退出QEMU。注意，在`exit_qemu`调用后，我们仍然需要一个无限循环的`loop`因为编译器并不知道 `isa-debug-exit`设备会导致程序退出。
 
-Now QEMU also exits for failed tests and prints a useful error message on the console:
+现在，即使在测试失败的情况下QEMU仍然会存在，并会将一些有用的错误信息打印到控制台:
 
 ```
 > cargo xtest
@@ -432,11 +432,11 @@ Error: panicked at 'assertion failed: `(left == right)`
  right: `1`', src/main.rs:65:5
 ```
 
-Since we see all test output on the console now, we no longer need the QEMU window that pops up for a short time. So we can hide it completely.
+由于我们现在将所有的测试输出到控制台上了，我们不再需要让QEMU窗口弹出来一小会了。所以，我们可以将其完全隐藏。
 
-### Hiding QEMU
+### 隐藏 QEMU
 
-Since we report out the complete test results using the `isa-debug-exit` device and the serial port, we don't need the QEMU window anymore. We can hide it by passing the `-display none` argument to QEMU:
+由于我们使用`isa-debug-exit`设备和串行端口来报告完整的测试结果，所以我们不再需要QMEU的窗口了。我们可以通过向QEMU传递 `-display none`参数来将其隐藏:
 
 ```toml
 # in Cargo.toml
@@ -448,22 +448,23 @@ test-args = [
 ]
 ```
 
-Now QEMU runs completely in the background and no window is opened anymore. This is not only less annoying, but also allows our test framework to run in environments without a graphical user interface, such as CI services or [SSH] connections.
+现在QEMU完全在后台运行且没有任何窗口会被打开。这不仅不那么烦人，还允许我们的测试框架在没有图形界面的环境里，诸如CI服务器或是[SSH]连接里运行。
 
 [SSH]: https://en.wikipedia.org/wiki/Secure_Shell
 
-### Timeouts
+### 超时
 
-Since `cargo xtest` waits until the test runner exits, a test that never returns can block the test runner forever. That's unfortunate, but not a big problem in practice since it's normally easy to avoid endless loops. In our case, however, endless loops can occur in various situations:
+由于 `cargo xtest` 会等待test runner退出，如果一个测试永远不返回那么它就会一直阻塞test runner。幸运的是，在实际应用中这并不是一个大问题因为无限循环通常是很容易避免的。在我们的这个例子里，无限循环会发生在以下几种不同的情况中:
 
-- The bootloader fails to load our kernel, which causes the system to reboot endlessly.
-- The BIOS/UEFI firmware fails to load the bootloader, which causes the same endless rebooting.
-- The CPU enters a `loop {}` statement at the end of some of our functions, for example because the QEMU exit device doesn't work properly.
-- The hardware causes a system reset, for example when a CPU exception is not caught (explained in a future post).
 
-Since endless loops can occur in so many situations, the `bootimage` tool sets a timeout of 5 minutes for each test executable by default. If the test does not finish in this time, it is marked as failed and a "Timed Out" error is printed to the console. This feature ensures that tests that are stuck in an endless loop don't block `cargo xtest` forever.
+- bootloader加载内核失败，导致系统不停重启。
+- BIOS/UEFI固件加载bootloader失败，同样会导致无限重启。
+- CPU在某些函数结束时进入一个`loop{}`语句，例如因为QEMU的exit设备无法正常工作而导致死循环。
+- 硬件触发了系统重置，例如未捕获CPU异常时(在后续的文章里会进行解释)。
 
-You can try it yourself by adding a `loop {}` statement in the `trivial_assertion` test. When you run `cargo xtest`, you see that the test is marked as timed out after 5 minutes. The timeout duration is [configurable][bootimage config] through a `test-timeout` key in the Cargo.toml:
+由于无限循环可能会在各种情况中发生，因此， `bootimage` 工具默认为每个可执行测试设置了一个长度为5分钟的超时时间。如果测试未在此时间内完成，则将其标记为失败，并向控制台输出"Timed Out(超时)"错误。这个功能确保了那些卡在无限循环里的测试不会一直阻塞`cargo xtest`。
+
+你可以将`loop{}`语句添加到 `trivial_assertion`测试中来进行尝试。当你运行 `cargo xtest`时，你可以发现该测试会在五分钟后被标记为超时。超时持续的时间可以通过Cargo.toml中的`test-timeout`来进行[配置][bootimage config]:
 
 [bootimage config]: https://github.com/rust-osdev/bootimage#configuration
 
@@ -474,13 +475,13 @@ You can try it yourself by adding a `loop {}` statement in the `trivial_assertio
 test-timeout = 300          # (in seconds)
 ```
 
-If you don't want to wait 5 minutes for the `trivial_assertion` test to time out, you can temporarily decrease the above value.
+如果你不想为了观察`trivial_assertion` 测试超时等待5分钟之久，你可以暂时降低将上述值。
 
-After this, we no longer need the `trivial_assertion` test, so we can delete it.
+此后，我们不再需要 `trivial_assertion` 测试，所以我们可以将其删除。
 
-## Testing the VGA Buffer
+## 测试VGA缓冲区
 
-Now that we have a working test framework, we can create a few tests for our VGA buffer implementation. First, we create a very simple test to verify that `println` works without panicking:
+现在我们已经有了一个可以工作的测试框架了，我们可以为我们的VGA缓冲区实现创建一些测试。首先，我们创建了一个非常简单的测试来验证 `println`是否正常运行而不会panic:
 
 ```rust
 // in src/vga_buffer.rs
@@ -496,9 +497,9 @@ fn test_println_simple() {
 }
 ```
 
-The test just prints something to the VGA buffer. If it finishes without panicking, it means that the `println` invocation did not panic either. Since we only need the `serial_println` import in test mode, we add the `cfg(test)` attribute to avoid the unused import warning for a normal `cargo xbuild`.
+这个测试所做的仅仅是将一些内容打印到VGA缓冲区。如果它正常结束并且没有panic，也就意味着`println`调用也没有panic。由于我们只需要将 `serial_println` 导入到测试模式里，所以我们添加了 `cfg(test)` attribute(属性)来避免正常模式下 `cargo xbuild`会出现的未使用导入警告(unused import warning)。
 
-To ensure that no panic occurs even if many lines are printed and lines are shifted off the screen, we can create another test:
+为了确保即使打印很多行且有些行超出屏幕的情况下也没有panic发生，我们创建了另一个测试:
 
 ```rust
 // in src/vga_buffer.rs
@@ -513,7 +514,7 @@ fn test_println_many() {
 }
 ```
 
-We can also create a test function to verify that the printed lines really appear on the screen:
+我们还创建了一个测试函数用来验证打印的几行字符是否真的出现在了屏幕上:
 
 ```rust
 // in src/vga_buffer.rs
@@ -533,23 +534,24 @@ fn test_println_output() {
 }
 ```
 
-The function defines a test string, prints it using `println`, and then iterates over the screen characters of the static `WRITER`, which represents the vga text buffer. Since `println` prints to the last screen line and then immediately appends a newline, the string should appear on line `BUFFER_HEIGHT - 2`.
+该函数定义了一个测试字符串，并通过 `println`将其输出，然后遍历静态 `WRITER`也就是vga字符缓冲区的屏幕字符。由于`println`在将字符串打印到屏幕上最后一行后会立刻附加一个新行(即输出完后有一个换行符)，所以这个字符串应该会出现在第 `BUFFER_HEIGHT - 2`行。
 
-By using [`enumerate`], we count the number of iterations in the variable `i`, which we then use for loading the screen character corresponding to `c`. By comparing the `ascii_character` of the screen character with `c`, we ensure that each character of the string really appears in the vga text buffer.
+通过使用[`enumerate`] ，我们统计了变量`i`的迭代次数，然后用它来加载对应于`c`的屏幕字符。 通过比较屏幕字符的`ascii_character`和`c` ，我们可以确保字符串的每个字符确实出现在vga文本缓冲区中。
 
 [`enumerate`]: https://doc.rust-lang.org/core/iter/trait.Iterator.html#method.enumerate
 
-As you can imagine, we could create many more test functions, for example a function that tests that no panic occurs when printing very long lines and that they're wrapped correctly. Or a function for testing that newlines, non-printable characters, and non-unicode characters are handled correctly.
+如你所想，我们可以创建更多的测试函数，例如一个用来测试当打印一个很长的且包装正确的行时是否会发生panic的函数。或是一个用于测试换行符，不可打印字符，非unicode字符是否能被正确处理的函数。
 
-For the rest of this post, however, we will explain how to create _integration tests_ to test the interaction of different components together.
+在这篇文章的剩余部分，我们还会解释如何创建一个 _集成测试_以测试不同组建之间的交互。 
 
-## Integration Tests
 
-The convention for [integration tests] in Rust is to put them into a `tests` directory in the project root (i.e. next to the `src` directory). Both the default test framework and custom test frameworks will automatically pick up and execute all tests in that directory.
+## 集成测试
 
-[integration tests]: https://doc.rust-lang.org/book/ch11-03-test-organization.html#integration-tests
+在Rust中，[集成测试]的约定是将其放到项目根目录中的`tests`目录下(即`src`的同级目录)。无论是默认测试框架还是自定义测试框架都将自动获取并执行该目录下所有的测试。
 
-All integration tests are their own executables and completely separate from our `main.rs`. This means that each test needs to define its own entry point function. Let's create an example integration test named `basic_boot` to see how it works in detail:
+[集成测试]: https://doc.rust-lang.org/book/ch11-03-test-organization.html#integration-tests
+
+所有的集成测试都是它们自己的可执行文件，并且与我们的`main.rs`完全独立。这也就意味着每个测试都需要定义它们自己的函数入口点。让我们创建一个名为`basic_boot`的例子来看看集成测试的工作细节吧:
 
 ```rust
 // in tests/basic_boot.rs
@@ -579,7 +581,7 @@ fn panic(info: &PanicInfo) -> ! {
 }
 ```
 
-Since integration tests are separate executables, we need to provide all the crate attributes (`no_std`, `no_main`, `test_runner`, etc.) again. We also need to create a new entry point function `_start`, which calls the test entry point function `test_main`. We don't need any `cfg(test)` attributes because integration test executables are never built in non-test mode.
+由于集成测试都是单独的可执行文件，所以我们需要再次提供所有的crate属性(`no_std`, `no_main`, `test_runner`, 等等)。我们还需要创建一个新的入口点函数`_start`，用于调用测试入口函数`test_main`。我们不需要任何的`cfg(test)` attributes(属性)，因为集成测试的二进制文件在非测试模式下根本不会被编译构建。 
 
 We use the [`unimplemented`] macro that always panics as a placeholder for the `test_runner` function and just `loop` in the `panic` handler for now. Ideally, we want to implement these functions exactly as we did in our `main.rs` using the `serial_println` macro and the `exit_qemu` function. The problem is that we don't have access to these functions since tests are built completely separately of our `main.rs` executable.
 
