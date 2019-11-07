@@ -49,7 +49,7 @@ error[E0463]: can't find crate for `test`
 
 [`自定义测试框架(custom_test_frameworks)`]: https://doc.rust-lang.org/unstable-book/language-features/custom-test-frameworks.html
 
-与默认的测试框架相比，它的缺点是有一些高级功能诸如 [`should_panic` tests]都不可用了。相对的，如果需要这些功能，我们需要自己来实现。当然，这点对我们来说是好事，因为我们的环境非常特殊，在这个环境里，这些高级功能的默认实现无论如何都是无法工作的，举个例子， #[should_panic]属性依赖于堆栈展开来捕获内核panic，而我的内核早已将其禁用了。
+与默认的测试框架相比，它的缺点是有一些高级功能诸如 [`should_panic` tests]都不可用了。相对的，如果需要这些功能，我们需要自己来实现。当然，这点对我们来说是好事，因为我们的环境非常特殊，在这个环境里，这些高级功能的默认实现无论如何都是无法工作的，举个例子， `#[should_panic]`属性依赖于堆栈展开来捕获内核panic，而我的内核早已将其禁用了。
 
 [`should_panic` tests]: https://doc.rust-lang.org/book/ch11-01-writing-tests.html#checking-for-panics-with-should_panic
 
@@ -70,13 +70,13 @@ fn test_runner(tests: &[&dyn Fn()]) {
 }
 ```
 
-我们的runner会打印一个简短的debug信息然后调用列表中的每个测试函数。参数类型 `&[&dyn Fn()]` 是[_Fn()_] trait的 [_trait object_] 引用的一个 [_slice_]。它基本上可以被看做一个可以像函数一样被调用的类型的引用列表。由于这个函数在不进行测试的时候没有什么用，我们使用 `#[cfg(test)]`属性保证它只会出现在测试中。 
+我们的runner会打印一个简短的debug信息然后调用列表中的每个测试函数。参数类型 `&[&dyn Fn()]` 是[_Fn()_] trait的 [_trait object_] 引用的一个 [_slice_]。它基本上可以被看做一个可以像函数一样被调用的类型的引用列表。由于这个函数在不进行测试的时候没有什么用，这里我们使用 `#[cfg(test)]`属性保证它只会出现在测试中。 
 
 [_slice_]: https://doc.rust-lang.org/std/primitive.slice.html
 [_trait object_]: https://doc.rust-lang.org/1.30.0/book/first-edition/trait-objects.html
 [_Fn()_]: https://doc.rust-lang.org/std/ops/trait.Fn.html
 
-现在当我们运行 `cargo xtest` ，我们可以发现运行成功了。然而，我们看到的仍然是"Hello World"而不是我们的 `test_runner`传递来的信息。这是由于我们的入口点仍然是 `_start` 函数。自定义测试框架会生成一个`main`来供 `test_runner` `test_runner`调用，但是由于我们使用了 `#[no_main]`并提供了我们自己的入口点，所以这个`main`函数就被忽略了。
+现在当我们运行 `cargo xtest` ，我们可以发现运行成功了。然而，我们看到的仍然是"Hello World"而不是我们的 `test_runner`传递来的信息。这是由于我们的入口点仍然是 `_start` 函数。自定义测试框架会生成一个`main`函数来调用`test_runner`，但是由于我们使用了 `#[no_main]`并提供了我们自己的入口点，所以这个`main`函数就被忽略了。
 
 为了修复这个问题，我们需要通过 `reexport_test_harness_main`属性来将生成的函数的名称更改为与`main`不同的名称。然后我们可以在我们的`_start`函数里调用这个重命名的函数:
 
@@ -583,15 +583,14 @@ fn panic(info: &PanicInfo) -> ! {
 
 由于集成测试都是单独的可执行文件，所以我们需要再次提供所有的crate属性(`no_std`, `no_main`, `test_runner`, 等等)。我们还需要创建一个新的入口点函数`_start`，用于调用测试入口函数`test_main`。我们不需要任何的`cfg(test)` attributes(属性)，因为集成测试的二进制文件在非测试模式下根本不会被编译构建。 
 
-We use the [`unimplemented`] macro that always panics as a placeholder for the `test_runner` function and just `loop` in the `panic` handler for now. Ideally, we want to implement these functions exactly as we did in our `main.rs` using the `serial_println` macro and the `exit_qemu` function. The problem is that we don't have access to these functions since tests are built completely separately of our `main.rs` executable.
+这里我们采用[`unimplemented`]宏，该宏会在`test_runner`以一个占位符的形式panic，并进入`loop`循环作为`panic`后的处理(fix wanted)。理想情况下，我们希望能向我们在`main.rs`里所做的一样使用`serial_println`宏和`exit_qemu`函数来实现这个函数。但问题是，由于这些测试的构建和我们的`main.rs`的可执行文件是完全独立的，我们没有办法使用这些函数。
 
 [`unimplemented`]: https://doc.rust-lang.org/core/macro.unimplemented.html
 
-If you run `cargo xtest` at this stage, you will get an endless loop because the panic handler loops endlessly. You need to use the `Ctrl+c` keyboard shortcut for exiting QEMU.
+如果现阶段你运行`cargo xtest`，你就会进入一个无限循环，因为目前panic的处理就是进入无限循环。你需要使用快捷键`Ctrl+c`，才可以退出QEMU。
 
-### Create a Library
-
-To make the required functions available to our integration test, we need to split off a library from our `main.rs`, which can be included by other crates and integration test executables. To do this, we create a new `src/lib.rs` file:
+### 创建一个库
+为了让这些函数能在我们的集成测试中使用，我们需要从我们的`main.rs`中分割出一个库，这个库应当可以被其他的crate和集成测试可执行文件使用。为了达成这个目的，我们创建了一个新文件，`src/lib.rs`:
 
 ```rust
 // src/lib.rs
@@ -599,9 +598,9 @@ To make the required functions available to our integration test, we need to spl
 #![no_std]
 ```
 
-Like the `main.rs`, the `lib.rs` is a special file that is automatically recognized by cargo. The library is a separate compilation unit, so we need to specify the `#![no_std]` attribute again.
+和`main.rs`一样，`lib.rs`也是一个可以被cargo自动识别的特殊文件。该库是一个独立的编译单元，所以我们需要再次指定`#![no_std]` attribute(属性)。
 
-To make our library work with `cargo xtest`, we need to also add the test functions and attributes:
+为了让我们的库可以和`cargo xtest`一起协同工作，我们还需要添加以下测试函数和属性:
 
 ```rust
 // in src/lib.rs
@@ -643,13 +642,13 @@ fn panic(info: &PanicInfo) -> ! {
 }
 ```
 
-To make our `test_runner` available to executables and integration tests, we don't apply the `cfg(test)` attribute to it and make it public. We also factor out the implementation of our panic handler into a public `test_panic_handler` function, so that it is available for executables too.
+为了能在可执行文件和集成测试中使用`test_runner`，我们不对其应用`cfg(test)` attribute(属性)，并将其设置为public。同时，我们还将panic的处理程序分解为public函数`test_panic_handler`，这样一来它也可以用于可执行文件了。
 
-Since our `lib.rs` is tested independently of our `main.rs`, we need to add a `_start` entry point and a panic handler when the library is compiled in test mode. By using the [`cfg_attr`] crate attribute, we conditionally enable the `no_main` attribute in this case.
+由于我们的`lib.rs`是独立于`main.rs`进行测试的，因此当该库实在测试模式下编译时我们需要添加一个`_start`入口点和一个panic处理程序。通过使用[`cfg_attr`] crate attribute，我们可以在这种情况下有条件的启用`no_main` attribute。
 
 [`cfg_attr`]: https://doc.rust-lang.org/reference/conditional-compilation.html#the-cfg_attr-attribute
 
-We also move over the `QemuExitCode` enum and the `exit_qemu` function and make them public:
+我们还将`QemuExitCode`枚举和`exit_qemu`函数(从main.rs)移动过来并将其设置为public:
 
 ```rust
 // in src/lib.rs
@@ -671,7 +670,7 @@ pub fn exit_qemu(exit_code: QemuExitCode) {
 }
 ```
 
-Now executables and integration tests can import these functions from the library and don't need to define their own implementations. To also make `println` and `serial_println` available, we move the module declarations too:
+现在，可执行文件和集成测试都可以从库中导入这些函数，而不需要实现自己的定义。为了使`println` 和 `serial_println`可用，我们将以下的模块声明代码也移动过来(译者注:即移动到lib.rs中):
 
 ```rust
 // in src/lib.rs
@@ -680,9 +679,9 @@ pub mod serial;
 pub mod vga_buffer;
 ```
 
-We make the modules public to make them usable from outside of our library. This is also required for making our `println` and `serial_println` macros usable, since they use the `_print` functions of the modules.
+我们将这些模块设置为public(公有)，这样一来我们在库的外部也一样能使用它们了。由于这两者都用了该模块内的`_print`函数，所以这也是让`println` 和 `serial_println`宏可用的必要条件。
 
-Now we can update our `main.rs` to use the library:
+现在我们修改我们的`main.rs`代码来使用该库:
 
 ```rust
 // src/main.rs
@@ -721,13 +720,13 @@ fn panic(info: &PanicInfo) -> ! {
 }
 ```
 
-The library is usable like a normal external crate. It is called like our crate, which is `blog_os` in our case. The above code uses the `blog_os::test_runner` function in the `test_runner` attribute and the `blog_os::test_panic_handler` function in our `cfg(test)` panic handler. It also imports the `println` macro to make it available to our `_start` and `panic` functions.
+可以看到，这个库用起来就像一个普通的external(外部) crate。它被称为`our crate(译者注:即自己的crate)`，在我们的这个例子中，就是`blog_os`。上述代码使用了`test_runner` attribute中的`blog_os::test_runner`函数和`cfg(test)`的panic处理中的`blog_os::test_panic_handler`函数。它还导入了`println`宏，这样一来，我们可以在我们的`_start` 和 `panic`中使用它了。
 
-At this point, `cargo xrun` and `cargo xtest` should work again. Of course, `cargo xtest` still loops endlessly (you can exit with `ctrl+c`). Let's fix this by using the required library functions in our integration test.
+与此同时，`cargo xrun` 和 `cargo xtest`可以再次正常工作了。当然了，`cargo xtest`仍然会进入无限循环(你可以通过`ctrl+c`来退出)。接下来让我们在我们的集成测试中通过所需要的库函数来修复这个问题吧。
 
-### Completing the Integration Test
+### 完成集成测试
 
-Like our `src/main.rs`, our `tests/basic_boot.rs` executable can import types from our new library. This allows us to import the missing components to complete our test.
+就像我们的`src/main.rs`，我们的`tests/basic_boot.rs`可执行文件同样可以从我们额新库中导入类型。这也就意味着我们可以导入缺失的组件来完成我们的测试。
 
 ```rust
 // in tests/basic_boot.rs
@@ -740,11 +739,11 @@ fn panic(info: &PanicInfo) -> ! {
 }
 ```
 
-Instead of reimplementing the test runner, we use the `test_runner` function from our library. For our `panic` handler, we call the `blog_os::test_panic_handler` function like we did in our `main.rs`.
+这里我们使用我们的库中的`test_runner`函数，而不是重新实现一个test runner。至于panic处理，调用`blog_os::test_panic_handler`函数即可，就像我们之前在我们的`main.rs`里面做的一样。
 
-Now `cargo xtest` exits normally again. When you run it, you see that it builds and runs the tests for our `lib.rs`, `main.rs`, and `basic_boot.rs` separately after each other. For the `main.rs` and the `basic_boot` integration test, it reports "Running 0 tests" since these files don't have any functions annotated with `#[test_case]`.
+现在，`cargo xtest`又可以正常退出了。当你运行该命令时，你会发现它为我们的`lib.rs`, `main.rs`, 和 `basic_boot.rs`分别构建并运行了测试。其中，对于 `main.rs` 和 `basic_boot`的集成测试，它会报告"Running 0 tests"(正在运行0个测试)，因为这些文件里面没有任何用 `#[test_case]`标注的函数。
 
-We can now add tests to our `basic_boot.rs`. For example, we can test that `println` works without panicking, like we did in the vga buffer tests:
+现在我们可以为我们的`basic_boot.rs`添加测试了。举个例子，我们可以测试`println`是否能够正常工作而不panic，就像我们之前在vga缓冲区测试中做的那样:
 
 ```rust
 // in tests/basic_boot.rs
@@ -759,239 +758,161 @@ fn test_println() {
 }
 ```
 
-When we run `cargo xtest` now, we see that it finds and executes the test function.
+现在当我们运行`cargo xtest`时，我们可以看到它会寻找并执行这些测试函数。
 
-The test might seem a bit useless right now since it's almost identical to one of the VGA buffer tests. However, in the future the `_start` functions of our `main.rs` and `lib.rs` might grow and call various initialization routines before running the `test_main` function, so that the two tests are executed in very different environments.
+由于该测试和vga缓冲区测试中的一个几乎完全相同，所以目前它看起来似乎没什么用。然而，在将来，我们的`mian.rs`和`lib.rs`中的`_start`函数的内容会不断增长，并且在运行`test_main`之前需要调用一系列的初始化进程，所以这两个测试将会运行在完全不同的环境中(译者注:也就是说虽然现在看起来差不多，但是在将来该测试和vga buffer中的测试会很不一样，有必要单独拿出来，这两者并没有重复)。 
 
-By testing `println` in a `basic_boot` environment without calling any initialization routines in `_start`, we can ensure that `println` works right after booting. This is important because we rely on it e.g. for printing panic messages.
+通过在`basic_boot`环境里不掉用任何初始化例程的`_start`中测试`println`函数，我们可以确保`println`在启动(boot)后可以正常工作。这一点非常重要，因为我们有很多部分依赖于`println`，例如打印panic信息。
 
-### Future Tests
+### 未来的测试
 
-The power of integration tests is that they're treated as completely separate executables. This gives them complete control over the environment, which makes it possible to test that the code interacts correctly with the CPU or hardware devices.
+集成测试的强大之处在于他们可以被看成是完全独立的可执行文件。这也给了它们完全控制环境的能力，使得他们能够测试代码是否和CPU或是其他硬件正确交互了。
 
-Our `basic_boot` test is a very simple example for an integration test. In the future, our kernel will become much more featureful and interact with the hardware in various ways. By adding integration tests, we can ensure that these interactions work (and keep working) as expected. Some ideas for possible future tests are:
+我们的`basic_boot`测试正是集成测试的一个非常简单的例子。在将来，我们的内核的功能会变得更多，和硬件交互的方式也会变得多种多样。通过添加集成测试，我们可以保证这些交互按预期工作(并一直保持工作)。下面是一些对于未来的测试的设想:
 
-- **CPU Exceptions**: When the code performs invalid operations (e.g. divides by zero), the CPU throws an exception. The kernel can register handler functions for such exceptions. An integration test could verify that the correct exception handler is called when a CPU exception occurs or that the execution continues correctly after resolvable exceptions.
-- **Page Tables**: Page tables define which memory regions are valid and accessible. By modifying the page tables, it is possible to allocate new memory regions, for example when launching programs. An integration test could perform some modifications of the page tables in the `_start` function and then verify that the modifications have the desired effects in `#[test_case]` functions.
-- **Userspace Programs**: Userspace programs are programs with limited access to the system's resources. For example, they don't have access to kernel data structures or to the memory of other programs. An integration test could launch userspace programs that perform forbidden operations and verify that the kernel prevents them all.
+- **CPU异常**: 当代码执行无效操作（例如除以零）时，CPU就会抛出异常。内核会为这些异常注册处理函数。集成测试可以验证在CPU异常时是否调用了正确的异常处理程序，或者在可解析的异常之后程序是否能正确执行。
+- **页表**: 页表定义了哪些内存区域是有效且可访问的。通过修改页表，可以重新分配新的内存区域，例如，当你启动一个软件的时候。我们可以在集成测试中调整`_start`函数中的一些页表项，并确认这些改动是否会对`#[test_case]`的函数产生影响。
+- **用户空间程序**: 用户空间程序是只能访问有限的系统资源的程序。例如，他们无法访问内核数据结构或是其他应用程序的内存。集成测试可以启动执行禁止操作的用户空间程序验证认内核是否会将这些操作全都阻止。
 
-As you can imagine, many more tests are possible. By adding such tests, we can ensure that we don't break them accidentally when we add new features to our kernel or refactor our code. This is especially important when our kernel becomes larger and more complex.
+可以想象，还有更多的测试可以进行。通过添加各种各样的测试，我们确保在为我们的内核添加新功能或是重构代码的时候不会意外的破坏他们。这一点在我们的内核变得更大和更复杂的时候显得尤为重要。
 
-## Testing Our Panic Handler
+### 那些应该Panic的测试
 
-Another thing that we can test with an integration test is that our panic handler is called correctly. The idea is to deliberately cause a panic in the test function and exit with a success exit code in the panic handler.
+标准库的测试框架支持允许构造失败测试的[`#[should_panic]` attribute][should_panic]。这个功能对于验证传递无效参数时函数是否会失败非常有用。不幸的是，这个属性需要标准库的支持，因此，在`#[no_std]`环境下无法使用。
 
-Since we exit from our panic handler, the panicking test never returns to the test runner. For this reason, it does not make sense to add more than one test because subsequent tests are never executed. For cases like this, where only a single test function exists, we can disable the test runner completely and run our test directly in the `_start` function.
+[should_panic]: https://doc.rust-lang.org/rust-by-example/testing/unit_testing.html#testing-panics
 
-### No Harness
-
-The `harness` flag defines whether a test runner is used for an integration test. When it's set to `false`, both the default test runner and the custom test runner feature are disabled, so that the test is treated like a normal executable.
-
-Let's create a panic handler test with a disabled `harness` flag. First, we create a skeleton for the test at `tests/panic_handler.rs`:
+尽管我们不能在我们的内核中使用`#[should_panic]` attribute，但是通过创建一个集成测试我们可以达到类似的效果--该集成测试可以从panic处理程序中返回一个成功错误代码。接下来让我一起来创建一个如上所述名为`should_panic`的测试吧:
 
 ```rust
-// in tests/panic_handler.rs
+// in tests/should_panic.rs
 
 #![no_std]
 #![no_main]
 
 use core::panic::PanicInfo;
-use blog_os::{QemuExitCode, exit_qemu};
-
-#[no_mangle]
-pub extern "C" fn _start() -> ! {
-    exit_qemu(QemuExitCode::Failed);
-    loop {}
-}
+use blog_os::{QemuExitCode, exit_qemu, serial_println};
 
 #[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    exit_qemu(QemuExitCode::Failed);
+fn panic(_info: &PanicInfo) -> ! {
+    serial_println!("[ok]");
+    exit_qemu(QemuExitCode::Success);
     loop {}
 }
 ```
 
-The code is similar to the `basic_boot` test with the difference that no test attributes are needed and no runner function is called. We immediately exit with an error from the `_start` entry point and the panic handler for now and first try to get it to compile.
+这个测试还没有完成，因为它尚未定义`_start`函数或是其他自定义的test runner attributes。让我们来补充缺少的内容吧:
 
-If you run `cargo xtest` now, you will get an error that the `test` crate is missing. This error occurs because we didn't set a custom test framework, so that the compiler tries to use the default test framework, which is unavailable for our panic. By setting the `harness` flag to `false` for the test in our `Cargo.toml`, we can fix this error:
+
+```rust
+// in tests/should_panic.rs
+
+#![feature(custom_test_frameworks)]
+#![test_runner(test_runner)]
+#![reexport_test_harness_main = "test_main"]
+
+#[no_mangle]
+pub extern "C" fn _start() -> ! {
+    test_main();
+
+    loop {}
+}
+
+pub fn test_runner(tests: &[&dyn Fn()]) {
+    serial_println!("Running {} tests", tests.len());
+    for test in tests {
+        test();
+        serial_println!("[test did not panic]");
+        exit_qemu(QemuExitCode::Failed);
+    }
+    exit_qemu(QemuExitCode::Success);
+}
+```
+
+这个测试定义了自己的`test_runner`函数，而不是复用`lib.rs`中的`test_runner`，该函数会在测试没有panic而是正常退出时返回一个错误退出代码(因为这里我们希望测试会panic)。如果没有定义测试函数，runner就会以一个成功错误代码退出。由于这个runner总是在执行完单个的测试后就退出，因此定义超过一个`#[test_case]`的函数都是没有意义的。
+
+现在我们来创建一个应该失败的测试:
+
+```rust
+// in tests/should_panic.rs
+
+use blog_os::serial_print;
+
+#[test_case]
+fn should_fail() {
+    serial_print!("should_fail... ");
+    assert_eq!(0, 1);
+}
+```
+
+该测试用 `assert_eq`来断言(assert)`0`和`1`是否相等。毫无疑问，这当然会失败(`0`当然不等于`1`)，所以我们的测试就会像我们想要的那样panic。
+
+当我们通过`cargo xtest --test should_panic`运行该测试时，我们会发现成功了因为该测试如我们预期的那样panic了。当我们将断言部分(即`assert_eq!(0, 1);`)注释掉后，我们就会发现测试失败并返回了 _"test did not panic"_ 的信息。
+
+这种方法的缺点是它只使用于单个的测试函数。对于多个`#[test_case]`函数，它只会执行第一个函数因为程序无法在panic处理被调用后继续执行。我目前没有想到解决这个问题的方法，如果你有任何想法，请务必告诉我！
+
+### 无约束测试
+
+对于那些只有单个测试函数的集成测试而言(例如我们的`should_panic`测试)，其实并不需要test runner。对于这种情况，我们可以完全禁用test runner，直接在`_start`函数中直接运行我们的测试。
+
+这里的关键就是在`Cargo.toml`中为测试禁用 `harness` flag，这个标志(flag)定义了是否将test runner用于集成测试中。如果该标志位被设置为`false`，那么默认的test runner和自定义的test runner功能都将被禁用，这样一来该测试就可以像一个普通的可执行程序一样运行了。
+
+现在让我们为我们的`should_panic`测试禁用`harness` flag吧:
 
 ```toml
 # in Cargo.toml
 
 [[test]]
-name = "panic_handler"
+name = "should_panic"
 harness = false
 ```
 
-Now the test compiles fine, but fails of course since we always exit with an error exit code.
-
-### Implementing the Test
-
-Let's complete the implementation of our panic handler test:
+现在我们通过移除test runner相关的代码大大简化了我们的`should_panic`测试。结果看起来如下:
 
 ```rust
-// in tests/panic_handler.rs
+// in tests/should_panic.rs
 
-use blog_os::{serial_print, serial_println, QemuExitCode, exit_qemu};
+#![no_std]
+#![no_main]
 
-const MESSAGE: &str = "Example panic message from panic_handler test";
-const PANIC_LINE: u32 = 14; // adjust this when moving the `panic!` call
+use core::panic::PanicInfo;
+use blog_os::{QemuExitCode, exit_qemu, serial_println};
 
 #[no_mangle]
 pub extern "C" fn _start() -> ! {
-    serial_print!("panic_handler... ");
-    panic!(MESSAGE); // must be in line `PANIC_LINE`
-}
-
-#[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    serial_println!("[ok]");
-    exit_qemu(QemuExitCode::Success);
-    loop {}
-}
-```
-
-We immediately `panic` in our `_start` function with a `MESSAGE`. In the panic handler, we exit with a success exit code. We don't need a `qemu_exit` call at the end of our `_start` function, since the Rust compiler knows for sure that the code after the `panic` is unreachable. If we run the test with `cargo xtest --test panic_handler` now, we see that it succeeds as expected.
-
-We will need the `MESSAGE` and `PANIC_LINE` constants in the next section. The `PANIC_LINE` constant specifies the line number that contains the `panic!` invocation, which is `14` in our case (but it might be different for you).
-
-### Checking the `PanicInfo`
-
-To ensure that the given `PanicInfo` is correct, we can extend the `panic` function to check that the reported message and file/line information are correct:
-
-```rust
-// in tests/panic_handler.rs
-
-#[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    check_message(info);
-    check_location(info);
-
-    // same as before
-    serial_println!("[ok]");
-    exit_qemu(QemuExitCode::Success);
-    loop {}
-}
-```
-
-We will show the implementation of `check_message` and `check_location` in a moment. Before that, we create a `fail` helper function that can be used to print an error message and exit QEMU with an failure exit code:
-
-```rust
-// in tests/panic_handler.rs
-
-fn fail(error: &str) -> ! {
-    serial_println!("[failed]");
-    serial_println!("{}", error);
+    should_fail();
+    serial_println!("[test did not panic]");
     exit_qemu(QemuExitCode::Failed);
+    loop{}
+}
+
+fn should_fail() {
+    serial_print!("should_fail... ");
+    assert_eq!(0, 1);
+}
+
+#[panic_handler]
+fn panic(_info: &PanicInfo) -> ! {
+    serial_println!("[ok]");
+    exit_qemu(QemuExitCode::Success);
     loop {}
 }
 ```
 
-Now we can implement our `check_location` function:
+现在我们可以通过我们的`_start`函数来直接调用`should_fail`函数了，如果返回则返回一个失败退出代码并退出。现在当我们执行`cargo xtest --test should_panic`时，我们可以发现测试的行为和之前完全一样。
 
-```rust
-// in tests/panic_handler.rs
+除了创建`should_panic`测试，禁用`harness` attribute对复杂集成测试也很有用，例如，当单个测试函数会产生一些边际效应需要通过特定的顺序执行时。
 
-fn check_location(info: &PanicInfo) {
-    let location = info.location().unwrap_or_else(|| fail("no location"));
-    if location.file() != file!() {
-        fail("file name wrong");
-    }
-    if location.line() != PANIC_LINE {
-        fail("file line wrong");
-    }
-}
-```
+## 总结
 
-The function takes queries the location information from the `PanicInfo` and fails if it does not exist. It then checks that the reported file name is correct by comparing it with the output of the compiler-provided [`file!`] macro. To check the reported line number, it compares it with the `PANIC_LINE` constant that we manually defined above.
+测试是一种非常有用的技术，它能确保特定的部件拥有我们期望的行为。即使它们不能显示是否有bug，它们仍然是用来寻找bug的利器，尤其是用来避免回归。
 
-[`file!`]: https://doc.rust-lang.org/core/macro.file.html
+本文讲述了如何为我们的Rust kernel创建一个测试框架。我们使用Rust的自定义框架功能为我们的裸机环境实现了一个简单的`#[test_case]` attribute支持。通过使用QEMU的`isa-debug-exit`设备，我们的test runner可以在运行测试后退出QEMU并报告测试状态。我们还为串行端口实现了一个简单的驱动，使得错误信息可以被打印到控制台而不是VGA buffer中。
 
-#### Checking the Panic Message
+在为我们的`println`宏创建了一些测试后，我们在本文的后半部分还探索了集成测试。我们了解到它们位于`tests`目录中，并被视为完全独立的可执行文件。为了使他们能够使用`exit_qemu` 函数和 `serial_println` 宏，我们将大部分代码移动到一个库里，使其能够被导入到所有可执行文件和集成测试中。由于集成测试在各自独立的环境中运行，所以能够测试与硬件的交互或是创建应该panic的测试。
 
-Checking the reported panic message is a bit more complicated. The reason is that the [`PanicInfo::message`] function returns a [`fmt::Arguments`] instance that can't be compared with our `MESSAGE` string directly. To work around this, we need to create a `CompareMessage` struct:
+我们现在有了一个在QEMU内部真是环境中运行的测试框架。在未来的文章里，我们会创建更多的测试，从而让我们的内核在变得更复杂的同时保持可维护性。
 
-[`PanicInfo::message`]: https://doc.rust-lang.org/core/macro.file.html
-[`fmt::Arguments`]: https://doc.rust-lang.org/core/fmt/struct.Arguments.html
+## 下期预告
 
-```rust
-// in tests/panic_handler.rs
-
-use core::fmt;
-
-/// Compares a `fmt::Arguments` instance with the `MESSAGE` string
-///
-/// To use this type, write the `fmt::Arguments` instance to it using the
-/// `write` macro. If the message component matches `MESSAGE`, the `expected`
-/// field is the empty string.
-struct CompareMessage {
-    expected: &'static str,
-}
-
-impl fmt::Write for CompareMessage {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        if self.expected.starts_with(s) {
-            self.expected = &self.expected[s.len()..];
-        } else {
-            fail("message not equal to expected message");
-        }
-        Ok(())
-    }
-}
-```
-
-The trick is to implement the [`fmt::Write`] trait like we did for our [VGA buffer writer]. The [`write_str`] method is called with a `&str` parameter that we can compare with the expected message. An important detail is that the method is called _multiple times_ with the individual string components. For example, when we do `print!("{}z", "xy")` the method on our VGA buffer writer is invoked once with the string `"xy"` and once with the string `"z"`.
-
-[`fmt::Write`]: https://doc.rust-lang.org/core/fmt/trait.Write.html
-[VGA buffer writer]: ./second-edition/posts/03-vga-text-buffer/index.md#formatting-macros
-[`write_str`]: https://doc.rust-lang.org/core/fmt/trait.Write.html#tymethod.write_str
-
-This means that we can't directly compare the `s` argument with the expected message, since it might only be a substring. Instead, we use the [`starts_with`] method to verify that the given string component is a substring of the expected message. Then we use [string slicing] to remove the already printed characters from the `expected` string. If the `expected` field is an empty string after writing the panic message, it means that it matches the expected message.
-
-[`starts_with`]: https://doc.rust-lang.org/std/primitive.str.html#method.starts_with
-[string slicing]: https://doc.rust-lang.org/book/ch04-03-slices.html#string-slices
-
-
-With the `CompareMessage` type, we can finally implement our `check_message` function:
-
-```rust
-// in tests/panic_handler.rs
-
-#![feature(panic_info_message)] // at the top of the file
-
-use core::fmt::Write;
-
-fn check_message(info: &PanicInfo) {
-    let message = info.message().unwrap_or_else(|| fail("no message"));
-    let mut compare_message = CompareMessage { expected: MESSAGE };
-    write!(&mut compare_message, "{}", message)
-        .unwrap_or_else(|_| fail("write failed"));
-    if !compare_message.expected.is_empty() {
-        fail("message shorter than expected message");
-    }
-}
-```
-
-The function uses the [`PanicInfo::message`] function to get the panic message. If no message is reported, it calls `fail` to fail the test. Since the function is unstable, we need to add the `#![feature(panic_info_message)]` attribute at the top of our test file. Note that you need to adjust the `PANIC_INFO` line number after adding the attribute and the imports on top.
-
-[`PanicInfo::message`]: https://doc.rust-lang.org/core/panic/struct.PanicInfo.html#method.message
-
-After querying the message, the function constructs a `CompareMessage` instance with the `expected` field set to the `MESSAGE` string. Then it writes the message to it using the [`write!`] macro. After the write, it reads the `expected` field and fails the test if it is not the empty string.
-
-[`write!`]: https://doc.rust-lang.org/core/macro.write.html
-
-Now we can run the test using `cargo xtest --test panic_handler`. We see that it passes, which means that the reported panic info is correct. If we use a wrong line number in `PANIC_LINE` or panic with an additional character through `panic!("{}x", MESSAGE)`, we see that the test indeed fails.
-
-## Summary
-
-Testing is a very useful technique to ensure that certain components have a desired behavior. Even if they cannot show the absence of bugs, they're still an useful tool for finding them and especially for avoiding regressions.
-
-This post explained how to set up a test framework for our Rust kernel. We used the custom test frameworks feature of Rust to implement support for a simple `#[test_case]` attribute in our bare-metal environment. By using the `isa-debug-exit` device of QEMU, our test runner can exit QEMU after running the tests and report the test status out. To print error messages to the console instead of the VGA buffer, we created a basic driver for the serial port.
-
-After creating some tests for our `println` macro, we explored integration tests in the second half of the post. We learned that they live in the `tests` directory and are treated as completely separate executables. To give them access to the `exit_qemu` function and the `serial_println` macro, we moved most of our code into a library that can be imported by all executables and integration tests. Since integration tests run in their own separate environment, they make it possible to test the interactions with the hardware or Rust's panic system.
-
-We now have a test framework that runs in a realistic environment inside QEMU. By creating more tests in future posts, we can keep our kernel maintainable when it becomes more complex.
-
-## What's next?
-
-In the next post, we will explore _CPU exceptions_. These exceptions are thrown by the CPU when something illegal happens, such as a division by zero or an access to an unmapped memory page (a so-called “page fault”). Being able to catch and examine these exceptions is very important for debugging future errors. Exception handling is also very similar to the handling of hardware interrupts, which is required for keyboard support.
+在下一篇文章中，我们将会探索 _CPU异常_。CPU会在一些非法事件发生时抛出这些异常，例如除0或是访问没有映射的内存页(通常也被称为`page fault`(缺页异常)))。能够捕获和检查这些异常对于调试将来的错误是非常重要的。异常处理和中断处理非常类似，它们都需要键盘的支持。
